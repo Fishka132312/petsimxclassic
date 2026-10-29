@@ -74,12 +74,12 @@ AutoFarmSection:Paragraph({
 AutoFarmSection:Divider()
 
 local BubblesFarmToggle = AutoFarmSection:Toggle({
-    Name = "Bubbles Farm",
+    Name = "Auto Collect LootBags",
 	Tooltip = "Automatically collects event bubbles on the map",
-    Flag = "TicketFarm",
+    Flag = "AutoCollectLootBags",
     Default = false,
     Callback = function(Value)
-        _G.FarmEvent = Value
+        _G.AutoCollectLootBags = Value
     end
 })
 
