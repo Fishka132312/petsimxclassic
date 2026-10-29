@@ -1,5 +1,8 @@
 local RunService = game:GetService("RunService")
 
+local RunId = {}
+_G.OrbsRunId = RunId
+
 local Library = require(game.ReplicatedStorage:WaitForChild("Framework"):WaitForChild("Library"))
 while not Library.Loaded do
     RunService.Heartbeat:Wait()
@@ -12,7 +15,7 @@ if _G.AutoCollectOrbs == nil then
 end
 
 task.spawn(function()
-    while true do
+    while _G.OrbsRunId == RunId do
         task.wait(0.2)
 
         if _G.AutoCollectOrbs then
