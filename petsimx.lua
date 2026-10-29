@@ -6,6 +6,7 @@ local LocalPlayer = Players.LocalPlayer
 
 local scripts = {
   'AutoFarm/AutoCollectLootBags.lua',
+  'AutoCollectOrbs.lua',
 }
 
 local baseUrl = 'https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/'
@@ -73,13 +74,23 @@ AutoFarmSection:Paragraph({
 
 AutoFarmSection:Divider()
 
-local BubblesFarmToggle = AutoFarmSection:Toggle({
+local AutoFarmToggle = AutoFarmSection:Toggle({
     Name = "Auto Collect LootBags",
 	Tooltip = "Automatically collects event bubbles on the map",
     Flag = "AutoCollectLootBags",
     Default = false,
     Callback = function(Value)
         _G.AutoCollectLootBags = Value
+    end
+})
+
+local AutoFarmToggle = AutoFarmSection:Toggle({
+    Name = "Auto Collect Orbs",
+	Tooltip = "Automatically collects event bubbles on the map",
+    Flag = "AutoCollectOrbs",
+    Default = false,
+    Callback = function(Value)
+        _G.AutoCollectOrbs = Value
     end
 })
 
