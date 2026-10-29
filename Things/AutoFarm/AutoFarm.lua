@@ -129,6 +129,16 @@ end
 CoinsFolder.DescendantAdded:Connect(registerCoin)
 CoinsFolder.DescendantRemoving:Connect(unregisterCoin)
 
+-- Имена всех найденных локаций (для дропдаунов)
+function CoinManager.GetLocationNames()
+	local names = {}
+	for name in pairs(CoinManager.CoinsByLocation) do
+		table.insert(names, name)
+	end
+	table.sort(names)
+	return names
+end
+
 -- Список живых монет локации, отсортированный по расстоянию от origin.
 -- locationName = nil -> все локации.
 function CoinManager.GetCoins(locationName, origin)
@@ -141,7 +151,12 @@ function CoinManager.GetCoins(locationName, origin)
 		end
 	end
 
-	if locationName then
+	if type(locationName) == "table" then
+		-- список локаций: { "Forest", "Desert" }
+		for _, name in ipairs(locationName) do
+			collect(CoinManager.CoinsByLocation[name] or {})
+		end
+	elseif locationName then
 		collect(CoinManager.CoinsByLocation[locationName] or {})
 	else
 		for _, set in pairs(CoinManager.CoinsByLocation) do
