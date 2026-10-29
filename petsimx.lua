@@ -7,6 +7,7 @@ local LocalPlayer = Players.LocalPlayer
 local scripts = {
   'AutoFarm/AutoCollectLootBags.lua',
   'AutoFarm/AutoCollectOrbs.lua',
+  'AutoFarm/AutoFarm.lua',
 }
 
 local baseUrl = 'https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/'
@@ -51,7 +52,7 @@ local Window = Library:Window({
 
 -------------------------Event-----------------------
 
-local AutoFarmCat = Window:Category("Event")
+local AutoFarmCat = Window:Category("AutoFarm")
 local EventPage = Window:Page({
 		Name = "Auto Farm",
 		Icon = "https://i.postimg.cc/6q7p8GSZ/Bez-imeni-2.png",
@@ -59,7 +60,7 @@ local EventPage = Window:Page({
 })
 
 --AutoFarm--
-local AutoFarmSection = EventPage:Section({Name = "Auto Farm", Side = 1, Icon = "https://i.postimg.cc/tCDF4BRx/Bez-imeni-1.png"})
+local AutoFarmSection = AutoFarm:Section({Name = "Auto Farm", Side = 1, Icon = "https://i.postimg.cc/tCDF4BRx/Bez-imeni-1.png"})
 
 AutoFarmSection:Image({
     Id = "https://tr.rbxcdn.com/180DAY-e56b664ddfffd78fa53a7674d75d7841/768/432/Image/Webp/noFilter",
@@ -70,6 +71,48 @@ AutoFarmSection:Image({
 AutoFarmSection:Paragraph({
     Name = "Auto Farm",
     Text = "Bubble farming is recommended only on VIP servers."
+})
+
+AutoFarmSection:Divider()
+
+local LocationDropdown = AutoFarmSection:Dropdown({
+    Name = "Select Location",
+    Tooltip = "Choose location to farm coins",
+    Flag = "FarmLocation",
+    Items = GetMapLocations(),
+    Default = "All",
+    Callback = function(Value)
+        _G.SelectedLocation = Value
+    end
+})
+
+AutoFarmSection:Button({
+    Name = "Refresh Locations",
+    Tooltip = "Update available locations list",
+    Callback = function()
+        LocationDropdown:Refresh(GetMapLocations(), _G.SelectedLocation or "All")
+    end
+})
+
+AutoFarmSection:Dropdown({
+    Name = "Farm Mode",
+    Tooltip = "Select pet distribution mode",
+    Flag = "FarmModeSelect",
+    Items = {"Aggressive", "Distributed"},
+    Default = "Aggressive",
+    Callback = function(Value)
+        _G.FarmType = Value
+    end
+})
+
+AutoFarmSection:Toggle({
+    Name = "Enable Auto Farm Coins",
+    Tooltip = "Sends pets to farm nearest coins on selected location",
+    Flag = "AutoFarmCoins",
+    Default = false,
+    Callback = function(Value)
+        _G.AutoFarmCoins = Value
+    end
 })
 
 AutoFarmSection:Divider()
