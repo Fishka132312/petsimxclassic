@@ -7,6 +7,7 @@ local LocalPlayer = Players.LocalPlayer
 local scripts = {
   'AutoFarm/AutoCollectLootBags.lua',
   'AutoFarm/AutoCollectOrbs.lua',
+  'AutoFarm/AutoFarm.lua',
 }
 
 local baseUrl = 'https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/'
