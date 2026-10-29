@@ -7,7 +7,6 @@ local LocalPlayer = Players.LocalPlayer
 local scripts = {
   'AutoFarm/AutoCollectLootBags.lua',
   'AutoFarm/AutoCollectOrbs.lua',
-  'AutoFarm/AutoFarm.lua',
 }
 
 local baseUrl = 'https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/'
@@ -52,7 +51,7 @@ local Window = Library:Window({
 
 -------------------------Event-----------------------
 
-local AutoFarmCat = Window:Category("AutoFarm")
+local AutoFarmCat = Window:Category("Event")
 local EventPage = Window:Page({
 		Name = "Auto Farm",
 		Icon = "https://i.postimg.cc/6q7p8GSZ/Bez-imeni-2.png",
@@ -60,7 +59,7 @@ local EventPage = Window:Page({
 })
 
 --AutoFarm--
-local AutoFarmSection = AutoFarm:Section({Name = "Auto Farm", Side = 1, Icon = "https://i.postimg.cc/tCDF4BRx/Bez-imeni-1.png"})
+local AutoFarmSection = EventPage:Section({Name = "Auto Farm", Side = 1, Icon = "https://i.postimg.cc/tCDF4BRx/Bez-imeni-1.png"})
 
 AutoFarmSection:Image({
     Id = "https://tr.rbxcdn.com/180DAY-e56b664ddfffd78fa53a7674d75d7841/768/432/Image/Webp/noFilter",
@@ -75,47 +74,68 @@ AutoFarmSection:Paragraph({
 
 AutoFarmSection:Divider()
 
-local LocationDropdown = AutoFarmSection:Dropdown({
-    Name = "Select Location",
-    Tooltip = "Choose location to farm coins",
-    Flag = "FarmLocation",
-    Items = GetMapLocations(),
-    Default = "All",
-    Callback = function(Value)
-        _G.SelectedLocation = Value
-    end
+-- Вставь этот блок в свой UI, где уже есть `Section`.
+-- PetsScript_v2.lua должен быть запущен РАНЬШЕ (он создаёт _G.PetTools).
+
+local Tools = _G.PetTools
+local AutoFarm = Tools.AutoFarm
+local CoinManager = Tools.CoinManager
+
+local selectedLocations = {}
+
+-- Приводит значение дропдауна к списку строк.
+-- Работает и для "Forest", и для {"Forest","Desert"}, и для {Forest = true}
+local function normalize(Value)
+	if type(Value) == "table" then
+		local list = {}
+		for k, v in pairs(Value) do
+			if type(v) == "string" then
+				table.insert(list, v)
+			elseif v == true and type(k) == "string" then
+				table.insert(list, k)
+			end
+		end
+		return list
+	end
+	return Value and { Value } or {}
+end
+
+local LocationDropdown = Section:Dropdown({
+	Name = "Farm Locations",
+	Tooltip = "Выбери локации для фарма",
+	Flag = "FarmLocations",
+	Items = CoinManager.GetLocationNames(),
+	Default = {},
+	Multi = true,
+	Size = 125,
+	OptionHolderSize = 125,
+	Callback = function(Value)
+		selectedLocations = normalize(Value)
+		-- если фарм уже идёт, подхватываем новый выбор сразу
+		if AutoFarm.Enabled and #selectedLocations > 0 then
+			AutoFarm.Location = selectedLocations
+		end
+	end
 })
 
-AutoFarmSection:Button({
-    Name = "Refresh Locations",
-    Tooltip = "Update available locations list",
-    Callback = function()
-        LocationDropdown:Refresh(GetMapLocations(), _G.SelectedLocation or "All")
-    end
+local FarmToggle = Section:Toggle({
+	Name = "Auto Farm",
+	Tooltip = "Включает/выключает фарм петами",
+	Flag = "AutoFarm",
+	Default = false,
+	Callback = function(Value)
+		if Value then
+			if #selectedLocations == 0 then
+				warn("[Pets] Выбери хотя бы одну локацию")
+				return
+			end
+			AutoFarm.Stop()
+			AutoFarm.Start(selectedLocations)
+		else
+			AutoFarm.Stop()
+		end
+	end
 })
-
-AutoFarmSection:Dropdown({
-    Name = "Farm Mode",
-    Tooltip = "Select pet distribution mode",
-    Flag = "FarmModeSelect",
-    Items = {"Aggressive", "Distributed"},
-    Default = "Aggressive",
-    Callback = function(Value)
-        _G.FarmType = Value
-    end
-})
-
-AutoFarmSection:Toggle({
-    Name = "Enable Auto Farm Coins",
-    Tooltip = "Sends pets to farm nearest coins on selected location",
-    Flag = "AutoFarmCoins",
-    Default = false,
-    Callback = function(Value)
-        _G.AutoFarmCoins = Value
-    end
-})
-
-AutoFarmSection:Divider()
 
 local AutoFarmToggle = AutoFarmSection:Toggle({
     Name = "Auto Collect LootBags",
