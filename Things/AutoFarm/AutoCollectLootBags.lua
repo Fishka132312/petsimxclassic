@@ -1,5 +1,8 @@
 local RunService = game:GetService("RunService")
 
+local RunId = {}
+_G.LootBagsRunId = RunId
+
 local Library = require(game.ReplicatedStorage:WaitForChild("Framework"):WaitForChild("Library"))
 while not Library.Loaded do
     RunService.Heartbeat:Wait()
@@ -7,10 +10,12 @@ end
 
 local Lootbags = Library.Things.Lootbags
 
-_G.AutoCollectLootBags = false
+if _G.AutoCollectLootBags == nil then
+    _G.AutoCollectLootBags = false
+end
 
 task.spawn(function()
-    while true do
+    while _G.LootBagsRunId == RunId do
         task.wait(0.2)
 
         if _G.AutoCollectLootBags then
