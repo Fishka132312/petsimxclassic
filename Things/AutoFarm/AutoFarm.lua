@@ -1,13 +1,12 @@
--------------------------------------------------------------------------------- 32131
+-------------------------------------------------------------------------------- 22222222222
 -- КОНФИГ (значения сняты с реальной игры)
 --------------------------------------------------------------------------------
 local CONFIG = {
 	CoinsPath = { "__THINGS", "Coins" },
 	PetsPath  = { "__THINGS", "Pets" },
 
-	-- Индекс ремоута в ReplicatedStorage:GetChildren() (из Cobalt).
-	-- Если фарм перестал работать, снова сними вызов в Cobalt и поменяй число.
-	RemoteIndex = 182,
+	-- Ремоут больше не задаётся индексом: скрипт запоминает его сам,
+	-- когда ты вручную кликаешь по монете (см. startLearning).
 
 	LocationAttr = "Area",  -- атрибут монеты с названием локации
 	IdAttr       = "ID",    -- атрибут ID у монет и петов
@@ -168,20 +167,61 @@ local function GetEquippedPetIds()
 	return ids
 end
 
-local cachedRemote
+local StarterGui = game:GetService("StarterGui")
+
+local function notify(text)
+	pcall(function()
+		StarterGui:SetCore("SendNotification", { Title = "Pets Farm", Text = text, Duration = 6 })
+	end)
+end
+
+-- Ремоут запоминается, когда игра сама отправляет петов на монету (твой ручной клик).
+-- Признак нужного вызова: InvokeServer("<число>", { "id...", ... }) на RemoteFunction в ReplicatedStorage.
+local learnedRemote
+
+local function startLearning()
+	if not (hookmetamethod and getnamecallmethod) then
+		warn("[Pets] Экзекутор не поддерживает hookmetamethod: авто-определение ремоута недоступно")
+		return
+	end
+
+	local function check(self, a, b)
+		if typeof(self) == "Instance"
+			and self:IsA("RemoteFunction")
+			and self.Parent == ReplicatedStorage
+			and type(a) == "string" and tonumber(a)
+			and type(b) == "table" and type(b[1]) == "string"
+			and string.sub(b[1], 1, 2) == "id"
+		then
+			learnedRemote = self
+			task.defer(function()
+				print("[Pets] Ремоут запомнен: " .. self:GetFullName())
+				notify("Remote saved, farm is ready")
+			end)
+		end
+	end
+
+	local wrap = newcclosure or function(f) return f end
+	local old
+	old = hookmetamethod(game, "__namecall", wrap(function(self, ...)
+		if not learnedRemote and getnamecallmethod() == "InvokeServer" then
+			pcall(check, self, ...)
+		end
+		return old(self, ...)
+	end))
+end
+
+startLearning()
+
 local function getRemote()
-	if cachedRemote and cachedRemote.Parent then
-		return cachedRemote
+	if learnedRemote and learnedRemote.Parent then
+		return learnedRemote
 	end
-	local r = ReplicatedStorage:GetChildren()[CONFIG.RemoteIndex]
-	if r and r:IsA("RemoteFunction") then
-		cachedRemote = r
-		return r
+	if not warned.remote then
+		warned.remote = true
+		warn("[Pets] Ремоут ещё не определён: вручную кликни по любой монете, чтобы скрипт его запомнил.")
+		notify("Click any coin once so the script can learn the remote")
 	end
-	warnOnce("remote", string.format(
-		"[Pets] По индексу %d нет RemoteFunction (индекс мог сдвинуться). Сними вызов в Cobalt и обнови CONFIG.RemoteIndex.",
-		CONFIG.RemoteIndex
-	))
 	return nil
 end
 
@@ -328,6 +368,7 @@ function AutoFarm.Start(locations)
 	AutoFarm.Enabled = true
 	AutoFarm.Location = locations
 	PetController.Reset()
+	warned.remote = nil
 
 	task.spawn(function()
 		while AutoFarm.Enabled do
