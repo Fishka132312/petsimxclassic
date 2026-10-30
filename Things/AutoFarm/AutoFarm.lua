@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------31123
+--------------------------------------------------------------------------------
 -- КОНФИГ
 --------------------------------------------------------------------------------
 local CONFIG = {
@@ -13,7 +13,7 @@ local CONFIG = {
 	SendDelay    = 0.05,
 	LoopInterval = 1.5,
 	StuckTimeout = 8,
-	Debug        = true,
+	Debug        = false, -- true = печатать каждую отправку в F9
 }
 
 --------------------------------------------------------------------------------
@@ -22,6 +22,7 @@ local CONFIG = {
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
+local StarterGui = game:GetService("StarterGui")
 local LocalPlayer = Players.LocalPlayer
 
 -- Если скрипт запущен повторно, останавливаем старый автофарм
@@ -35,6 +36,12 @@ local function warnOnce(key, text)
 		warned[key] = true
 		warn(text)
 	end
+end
+
+local function notify(text)
+	pcall(function()
+		StarterGui:SetCore("SendNotification", { Title = "Pets Farm", Text = text, Duration = 6 })
+	end)
 end
 
 local function getByPath(root, path)
@@ -74,6 +81,59 @@ local function getRootPos()
 	local char = LocalPlayer.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	return root and root.Position
+end
+
+--------------------------------------------------------------------------------
+-- 0. ХУК НА ИГРОВОЙ Network.Invoke
+-- Игра шлёт выбор монеты через ReplicatedStorage.Library.Client.Network.Invoke
+-- (Game.Pets -> SelectCoin). Скрипт запоминает такой вызов при твоём ручном
+-- клике по монете и дальше повторяет его через оригинальную функцию игры.
+--------------------------------------------------------------------------------
+do
+	local okReq, Network = pcall(function()
+		return require(ReplicatedStorage.Library.Client.Network)
+	end)
+
+	if not okReq then
+		warn("[Pets] Не удалось require Network: " .. tostring(Network))
+	elseif _G.PetsHooked then
+		-- уже захукано при прошлом запуске, _G.PetsPrefix/_G.PetsInvoke сохранились
+	elseif not hookfunction then
+		warn("[Pets] Экзекутор не поддерживает hookfunction")
+	elseif type(Network.Invoke) ~= "function" then
+		warn("[Pets] Network.Invoke не является функцией")
+	else
+		_G.PetsHooked = true
+		local orig
+		orig = hookfunction(Network.Invoke, function(...)
+			if not _G.PetsPrefix then
+				pcall(function()
+					local args = table.pack(...)
+					for i = 1, args.n - 1 do
+						local a, b = args[i], args[i + 1]
+						if type(a) == "string" and tonumber(a)
+							and type(b) == "table" and type(b[1]) == "string"
+							and string.sub(b[1], 1, 2) == "id"
+						then
+							-- всё, что стоит перед ID монеты, запоминаем как префикс
+							local prefix = { n = i - 1 }
+							for j = 1, i - 1 do
+								prefix[j] = args[j]
+							end
+							_G.PetsPrefix = prefix
+							task.defer(function()
+								print("[Pets] Вызов запомнен (аргументов в префиксе: " .. (i - 1) .. ")")
+								notify("Call saved, farm is ready")
+							end)
+							break
+						end
+					end
+				end)
+			end
+			return orig(...)
+		end)
+		_G.PetsInvoke = orig
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -144,7 +204,7 @@ function CoinManager.GetCoins(locations, origin)
 end
 
 --------------------------------------------------------------------------------
--- 2. ПЕТЫ И РЕМОУТ
+-- 2. ПЕТЫ И ОТПРАВКА
 --------------------------------------------------------------------------------
 local function GetEquippedPetIds()
 	local ids = {}
@@ -162,36 +222,53 @@ local function GetEquippedPetIds()
 	return ids
 end
 
--- Ремоут фиксированный (определён по логу игры)
-local function getRemote()
-	local r = ReplicatedStorage:FindFirstChild("RemoteFunction")
-	if r and r:IsA("RemoteFunction") then
-		return r
-	end
-	warnOnce("remote", "[Pets] ReplicatedStorage.RemoteFunction не найден")
-	return nil
-end
-
 local assignments = {}
 
+-- Один вызов = группа петов на одну монету. true, если вызов отправлен.
 local function sendGroup(coin, petIds)
 	if not coin or not coin.Parent or #petIds == 0 then return false end
-	local remote = getRemote()
-	if not remote then return false end
+
+	if not (_G.PetsPrefix and _G.PetsInvoke) then
+		if not warned.learn then
+			warned.learn = true
+			warn("[Pets] Кликни вручную по любой монете один раз, чтобы скрипт запомнил вызов")
+			notify("Click any coin once so the script can learn the call")
+		end
+		return false
+	end
 
 	local coinId = tostring(coin:GetAttribute(CONFIG.IdAttr) or coin.Name)
+	local prefix = _G.PetsPrefix
+	local args, n = {}, prefix.n
+	for i = 1, n do
+		args[i] = prefix[i]
+	end
+	args[n + 1] = coinId
+	args[n + 2] = petIds
+
 	task.spawn(function()
 		local ok, res = pcall(function()
-			return remote:InvokeServer(coinId, petIds)
+			return _G.PetsInvoke(table.unpack(args, 1, n + 2))
 		end)
-		if CONFIG.Debug then
-			print(string.format("[Pets] монета %s, петов %d -> ok=%s ответ=%s",
-				coinId, #petIds, tostring(ok), tostring(res)))
+
+		-- сервер отвечает таблицей { [idПета] = true/false }
+		local accepted = 0
+		if ok and type(res) == "table" then
+			for _, v in pairs(res) do
+				if v == true then accepted += 1 end
+			end
 		end
+
+		if CONFIG.Debug then
+			print(string.format("[Pets] монета %s, петов %d -> ok=%s принято=%d",
+				coinId, #petIds, tostring(ok), accepted))
+		end
+
 		if not ok then
 			warn("[Pets] Ошибка вызова: " .. tostring(res))
 			assignments[coin] = nil
-		elseif res == false then
+		elseif accepted == 0 then
+			-- сервер никого не принял: освобождаем петов, попробуем другую монету
 			assignments[coin] = nil
 		end
 	end)
@@ -246,7 +323,8 @@ function PetController.Distribute(locations)
 				a.lastHealth = hp
 				a.lastProgress = now
 			end
-			if now - a.lastProgress > CONFIG.StuckTimeout then
+			-- таймаут "застряли" только если у монеты вообще есть Health
+			if hp ~= nil and now - a.lastProgress > CONFIG.StuckTimeout then
 				assignments[coin] = nil
 			else
 				for _, id in ipairs(a.pets) do
@@ -308,7 +386,7 @@ function AutoFarm.Start(locations)
 	AutoFarm.Enabled = true
 	AutoFarm.Location = locations
 	PetController.Reset()
-	warned.remote = nil
+	warned.learn = nil
 
 	task.spawn(function()
 		while AutoFarm.Enabled do
@@ -332,4 +410,4 @@ _G.PetTools = {
 	Config = CONFIG,
 }
 
-print("[Pets] Готово. Запуск: _G.PetTools.AutoFarm.Start()")
+print("[Pets] Готово. Кликни вручную по любой монете (скрипт запомнит вызов), потом запускай автофарм")
