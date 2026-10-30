@@ -1,60 +1,71 @@
 --------------------------------------------------------------------------------
--- КОНФИГ: ВСЁ, ЧТО НАДО ПОДОГНАТЬ ПОД ИГРУ, ТОЛЬКО ЗДЕСЬ
+-- КОНФИГ (значения сняты с реальной игры)
 --------------------------------------------------------------------------------
 local CONFIG = {
-	CoinsFolderName     = "Coins",
-	LocationsFolderName = "Locations",
-	RemotesFolderName   = "Remotes",
-	RemoteName          = "SendPetToCoin", -- проверь в декомпиле!
+	CoinsPath = { "__THINGS", "Coins" },
+	PetsPath  = { "__THINGS", "Pets" },
 
-	-- Что отправлять в FireServer: "instance" (сам объект) или "id" (имя/UID)
-	PetArgMode  = "instance",
-	CoinArgMode = "instance",
+	-- Индекс ремоута в ReplicatedStorage:GetChildren() (из Cobalt).
+	-- Если фарм перестал работать, снова сними вызов в Cobalt и поменяй число.
+	RemoteIndex = 182,
 
-	-- Атрибут с UID пета/монеты (если PetArgMode/CoinArgMode = "id").
-	-- Если атрибута нет, будет использовано Name.
-	PetIdAttribute  = "UID",
-	CoinIdAttribute = "Id",
+	LocationAttr = "Area",  -- атрибут монеты с названием локации
+	IdAttr       = "ID",    -- атрибут ID у монет и петов
+	OwnerAttr    = "Owner", -- атрибут владельца у пета
 
-	SendDelay    = 0.05, -- пауза между отправками (защита от рейт-лимита)
+	PetsPerCoin  = 3,    -- сколько петов отправлять на одну монету
+	SendDelay    = 0.05, -- пауза между вызовами
 	LoopInterval = 1.5,  -- как часто автофарм пересчитывает цели
 }
 
 --------------------------------------------------------------------------------
--- СЕРВИСЫ
+-- СЕРВИСЫ И УТИЛИТЫ
 --------------------------------------------------------------------------------
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
-
 local LocalPlayer = Players.LocalPlayer
 
--- WaitForChild с таймаутом, чтобы скрипт не висел вечно, если имя неверное
-local function waitFor(parent, name, timeout)
-	local obj = parent:WaitForChild(name, timeout or 10)
-	if not obj then
-		warn(string.format("[Pets] Не найден '%s' в %s. Проверь имя в CONFIG.", name, parent:GetFullName()))
+local warned = {}
+local function warnOnce(key, text)
+	if not warned[key] then
+		warned[key] = true
+		warn(text)
 	end
-	return obj
 end
 
-local CoinsFolder = waitFor(Workspace, CONFIG.CoinsFolderName)
-local LocationsFolder = Workspace:FindFirstChild(CONFIG.LocationsFolderName) -- необязательная
-local Remotes = waitFor(ReplicatedStorage, CONFIG.RemotesFolderName)
-local SendPetRemote = Remotes and waitFor(Remotes, CONFIG.RemoteName)
-
-if not CoinsFolder or not SendPetRemote then
-	return -- без монет или ремоута скрипт работать не сможет
+local function getByPath(root, path)
+	local cur = root
+	for _, name in ipairs(path) do
+		cur = cur:WaitForChild(name, 5)
+		if not cur then
+			warn(string.format("[Pets] Не найден '%s' (путь: %s)", name, table.concat(path, ".")))
+			return nil
+		end
+	end
+	return cur
 end
 
---------------------------------------------------------------------------------
--- УТИЛИТЫ
---------------------------------------------------------------------------------
-local function getPos(obj)
-	if obj:IsA("Model") then
-		return obj:GetPivot().Position
+local CoinsFolder = getByPath(Workspace, CONFIG.CoinsPath)
+local PetsFolder = getByPath(Workspace, CONFIG.PetsPath)
+
+if not CoinsFolder then
+	return
+end
+
+-- Позиция монеты: часть POS, иначе меш Coin
+local function getPos(coin)
+	local p = coin:FindFirstChild("POS") or coin:FindFirstChild("Coin")
+	if p and p:IsA("BasePart") then
+		return p.Position
 	end
-	return obj.Position
+	if coin:IsA("Model") then
+		return coin:GetPivot().Position
+	end
+	if coin:IsA("BasePart") then
+		return coin.Position
+	end
+	return Vector3.zero
 end
 
 local function getRootPos()
@@ -63,104 +74,67 @@ local function getRootPos()
 	return root and root.Position
 end
 
--- Лежит ли точка внутри части/модели (для определения локации по зонам)
-local function isPointInside(container, point)
-	local cf, size
-	if container:IsA("BasePart") then
-		cf, size = container.CFrame, container.Size
-	elseif container:IsA("Model") then
-		cf, size = container:GetBoundingBox()
-	else
-		return false
-	end
-	local rel = cf:PointToObjectSpace(point)
-	return math.abs(rel.X) <= size.X / 2
-		and math.abs(rel.Y) <= size.Y / 2
-		and math.abs(rel.Z) <= size.Z / 2
-end
-
--- Определяем локацию: атрибут -> зона из Locations -> "Unknown"
-local function detectLocation(coin)
-	local attr = coin:GetAttribute("Location")
-	if attr then
-		return tostring(attr)
-	end
-
-	if LocationsFolder then
-		local pos = getPos(coin)
-		for _, zone in ipairs(LocationsFolder:GetChildren()) do
-			if isPointInside(zone, pos) then
-				return zone.Name
-			end
-		end
-	end
-
-	return "Unknown"
-end
-
 --------------------------------------------------------------------------------
--- 1. МЕНЕДЖЕР МОНЕТ
+-- 1. МОНЕТЫ
+-- Атрибуты (Area, HasLanded...) могут проставляться уже после появления монеты,
+-- поэтому локацию читаем в момент запроса, а не при регистрации.
 --------------------------------------------------------------------------------
 local CoinManager = {}
-CoinManager.CoinsByLocation = {} -- [locationName] = { [coin] = true }
-CoinManager.AllCoins = {}        -- [coin] = locationName
+CoinManager.AllCoins = {} -- [coin] = true
 
 local function registerCoin(coin)
-	if not (coin:IsA("BasePart") or coin:IsA("Model")) then return end
-
-	local loc = detectLocation(coin)
-	CoinManager.CoinsByLocation[loc] = CoinManager.CoinsByLocation[loc] or {}
-	CoinManager.CoinsByLocation[loc][coin] = true
-	CoinManager.AllCoins[coin] = loc
+	CoinManager.AllCoins[coin] = true
 end
 
 local function unregisterCoin(coin)
-	local loc = CoinManager.AllCoins[coin]
-	if loc and CoinManager.CoinsByLocation[loc] then
-		CoinManager.CoinsByLocation[loc][coin] = nil
-	end
 	CoinManager.AllCoins[coin] = nil
 end
 
--- Монеты могут лежать не прямо в папке, а во вложенных папках: берём всех потомков
-for _, d in ipairs(CoinsFolder:GetDescendants()) do
-	registerCoin(d)
+for _, c in ipairs(CoinsFolder:GetChildren()) do
+	registerCoin(c)
 end
-CoinsFolder.DescendantAdded:Connect(registerCoin)
-CoinsFolder.DescendantRemoving:Connect(unregisterCoin)
+CoinsFolder.ChildAdded:Connect(registerCoin)
+CoinsFolder.ChildRemoved:Connect(unregisterCoin)
 
--- Имена всех найденных локаций (для дропдаунов)
+local function coinLocation(coin)
+	return tostring(coin:GetAttribute(CONFIG.LocationAttr) or "Unknown")
+end
+
+-- Имена всех локаций, где сейчас есть монеты
 function CoinManager.GetLocationNames()
-	local names = {}
-	for name in pairs(CoinManager.CoinsByLocation) do
-		table.insert(names, name)
+	local set, names = {}, {}
+	for coin in pairs(CoinManager.AllCoins) do
+		local loc = coinLocation(coin)
+		if not set[loc] then
+			set[loc] = true
+			table.insert(names, loc)
+		end
 	end
 	table.sort(names)
 	return names
 end
 
--- Список живых монет локации, отсортированный по расстоянию от origin.
--- locationName = nil -> все локации.
-function CoinManager.GetCoins(locationName, origin)
-	local list = {}
-	local function collect(set)
-		for coin in pairs(set) do
-			if coin.Parent then
-				table.insert(list, coin)
-			end
+-- Живые монеты, отсортированные по расстоянию от origin.
+-- locations: nil (все), строка или список строк.
+function CoinManager.GetCoins(locations, origin)
+	local filter
+	if type(locations) == "string" then
+		filter = { [locations] = true }
+	elseif type(locations) == "table" then
+		filter = {}
+		for _, name in ipairs(locations) do
+			filter[name] = true
 		end
 	end
 
-	if type(locationName) == "table" then
-		-- список локаций: { "Forest", "Desert" }
-		for _, name in ipairs(locationName) do
-			collect(CoinManager.CoinsByLocation[name] or {})
-		end
-	elseif locationName then
-		collect(CoinManager.CoinsByLocation[locationName] or {})
-	else
-		for _, set in pairs(CoinManager.CoinsByLocation) do
-			collect(set)
+	local list = {}
+	for coin in pairs(CoinManager.AllCoins) do
+		if coin.Parent
+			and coin:GetAttribute("HasLanded") ~= false
+			and coin:GetAttribute("IsFalling") ~= true
+			and (not filter or filter[coinLocation(coin)])
+		then
+			table.insert(list, coin)
 		end
 	end
 
@@ -173,42 +147,70 @@ function CoinManager.GetCoins(locationName, origin)
 end
 
 --------------------------------------------------------------------------------
--- 2. ПЕТЫ
+-- 2. ПЕТЫ И РЕМОУТ
 --------------------------------------------------------------------------------
-local function GetEquippedPets()
-	local pets = {}
-	local folder = LocalPlayer:FindFirstChild("EquippedPets")
-		or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Pets"))
+-- ID моих петов: дети Pets с атрибутом Owner == мой ник
+local function GetEquippedPetIds()
+	local ids = {}
+	local folder = PetsFolder or Workspace:FindFirstChild("__THINGS") and Workspace.__THINGS:FindFirstChild("Pets")
+	if not folder then return ids end
 
-	if folder then
-		for _, pet in ipairs(folder:GetChildren()) do
-			table.insert(pets, pet)
+	for _, pet in ipairs(folder:GetChildren()) do
+		if pet:GetAttribute(CONFIG.OwnerAttr) == LocalPlayer.Name then
+			local id = pet:GetAttribute(CONFIG.IdAttr)
+			if id then
+				table.insert(ids, tostring(id))
+			end
 		end
 	end
-	return pets
+	return ids
 end
 
-local function toArg(obj, mode, attrName)
-	if mode == "id" then
-		return obj:GetAttribute(attrName) or obj.Name
+local cachedRemote
+local function getRemote()
+	if cachedRemote and cachedRemote.Parent then
+		return cachedRemote
 	end
-	return obj
+	local r = ReplicatedStorage:GetChildren()[CONFIG.RemoteIndex]
+	if r and r:IsA("RemoteFunction") then
+		cachedRemote = r
+		return r
+	end
+	warnOnce("remote", string.format(
+		"[Pets] По индексу %d нет RemoteFunction (индекс мог сдвинуться). Сними вызов в Cobalt и обнови CONFIG.RemoteIndex.",
+		CONFIG.RemoteIndex
+	))
+	return nil
 end
 
-local function fire(pet, coin)
-	local petArg = toArg(pet, CONFIG.PetArgMode, CONFIG.PetIdAttribute)
-	local coinArg = toArg(coin, CONFIG.CoinArgMode, CONFIG.CoinIdAttribute)
+-- Один вызов = группа петов на одну монету
+local function sendGroup(coin, petIds)
+	if not coin or not coin.Parent or #petIds == 0 then return end
+	local remote = getRemote()
+	if not remote then return end
 
-	local ok, err = pcall(function()
-		if SendPetRemote:IsA("RemoteFunction") then
-			SendPetRemote:InvokeServer(petArg, coinArg)
-		else
-			SendPetRemote:FireServer(petArg, coinArg)
+	local coinId = tostring(coin:GetAttribute(CONFIG.IdAttr) or coin.Name)
+	task.spawn(function()
+		local ok, err = pcall(function()
+			remote:InvokeServer(coinId, petIds)
+		end)
+		if not ok then
+			warn("[Pets] Ошибка вызова: " .. tostring(err))
 		end
 	end)
-	if not ok then
-		warn("[Pets] Ошибка отправки: " .. tostring(err))
+end
+
+-- Делит список петов на группы по PetsPerCoin
+local function chunk(list, size)
+	local groups = {}
+	for i = 1, #list, size do
+		local g = {}
+		for j = i, math.min(i + size - 1, #list) do
+			g[#g + 1] = list[j]
+		end
+		groups[#groups + 1] = g
 	end
+	return groups
 end
 
 --------------------------------------------------------------------------------
@@ -218,44 +220,41 @@ local PetController = {}
 
 -- Все петы на одну монету
 function PetController.SendAllToOne(coin)
-	if not coin or not coin.Parent then
-		warn("[Pets] Монета недействительна")
+	local ids = GetEquippedPetIds()
+	if #ids == 0 then
+		warnOnce("nopets", "[Pets] Не найдено петов с Owner = " .. LocalPlayer.Name)
 		return
 	end
-	for _, pet in ipairs(GetEquippedPets()) do
-		fire(pet, coin)
-		task.wait(CONFIG.SendDelay)
-	end
+	sendGroup(coin, ids)
 end
 
--- Каждый пет на свою ближайшую монету (по кругу, если монет меньше, чем петов).
--- locationName = nil -> берём монеты со всех локаций.
-function PetController.Distribute(locationName)
-	local pets = GetEquippedPets()
-	local origin = getRootPos()
-	local coins = CoinManager.GetCoins(locationName, origin)
-
-	if #pets == 0 then return end
-	if #coins == 0 then
-		warn("[Pets] Нет монет" .. (locationName and (" в локации " .. locationName) or ""))
+-- Группы петов на ближайшие монеты выбранных локаций
+function PetController.Distribute(locations)
+	local ids = GetEquippedPetIds()
+	if #ids == 0 then
+		warnOnce("nopets", "[Pets] Не найдено петов с Owner = " .. LocalPlayer.Name)
 		return
 	end
 
-	for i, pet in ipairs(pets) do
+	local coins = CoinManager.GetCoins(locations, getRootPos())
+	if #coins == 0 then return end
+
+	local groups = chunk(ids, math.max(1, CONFIG.PetsPerCoin))
+	for i, group in ipairs(groups) do
 		local coin = coins[((i - 1) % #coins) + 1]
-		fire(pet, coin)
+		sendGroup(coin, group)
 		task.wait(CONFIG.SendDelay)
 	end
 end
 
--- Случайные монеты
-function PetController.Random(locationName)
-	local pets = GetEquippedPets()
-	local coins = CoinManager.GetCoins(locationName, nil)
-	if #pets == 0 or #coins == 0 then return end
+-- Группы петов на случайные монеты
+function PetController.Random(locations)
+	local ids = GetEquippedPetIds()
+	local coins = CoinManager.GetCoins(locations, nil)
+	if #ids == 0 or #coins == 0 then return end
 
-	for _, pet in ipairs(pets) do
-		fire(pet, coins[math.random(1, #coins)])
+	for _, group in ipairs(chunk(ids, math.max(1, CONFIG.PetsPerCoin))) do
+		sendGroup(coins[math.random(1, #coins)], group)
 		task.wait(CONFIG.SendDelay)
 	end
 end
@@ -263,12 +262,12 @@ end
 --------------------------------------------------------------------------------
 -- 4. АВТОФАРМ
 --------------------------------------------------------------------------------
-local AutoFarm = { Enabled = false, Location = nil } -- Location = nil -> все локации
+local AutoFarm = { Enabled = false, Location = nil } -- Location: nil / строка / список
 
-function AutoFarm.Start(locationName)
+function AutoFarm.Start(locations)
 	if AutoFarm.Enabled then return end
 	AutoFarm.Enabled = true
-	AutoFarm.Location = locationName
+	AutoFarm.Location = locations
 
 	task.spawn(function()
 		while AutoFarm.Enabled do
@@ -282,15 +281,6 @@ function AutoFarm.Stop()
 	AutoFarm.Enabled = false
 end
 
---------------------------------------------------------------------------------
--- ИСПОЛЬЗОВАНИЕ
---------------------------------------------------------------------------------
--- AutoFarm.Start()          -- фармить везде, ближайшие монеты в приоритете
--- AutoFarm.Start("Forest")  -- только локация Forest
--- AutoFarm.Stop()
--- PetController.SendAllToOne(workspace.Coins.MegaCoin)
-
--- Доступ из консоли/других скриптов (LocalScript не может return-ить модуль)
 _G.PetTools = {
 	CoinManager = CoinManager,
 	PetController = PetController,
