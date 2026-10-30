@@ -1,22 +1,19 @@
--------------------------------------------------------------------------------- 22222222222
--- КОНФИГ (значения сняты с реальной игры)
+--------------------------------------------------------------------------------31123
+-- КОНФИГ
 --------------------------------------------------------------------------------
 local CONFIG = {
 	CoinsPath = { "__THINGS", "Coins" },
 	PetsPath  = { "__THINGS", "Pets" },
 
-	-- Ремоут больше не задаётся индексом: скрипт запоминает его сам,
-	-- когда ты вручную кликаешь по монете (см. startLearning).
+	LocationAttr = "Area",
+	IdAttr       = "ID",
+	OwnerAttr    = "Owner",
 
-	LocationAttr = "Area",  -- атрибут монеты с названием локации
-	IdAttr       = "ID",    -- атрибут ID у монет и петов
-	OwnerAttr    = "Owner", -- атрибут владельца у пета
-
-	PetsPerCoin  = 3,    -- сколько петов отправлять на одну монету
-	SendDelay    = 0.05, -- пауза между вызовами
-	LoopInterval = 1.5,  -- как часто автофарм пересчитывает цели
-	StuckTimeout = 8,    -- если у монеты 8 сек не меняется Health, отправляем петов заново
-	Debug        = true, -- печатать в F9 каждую отправку и ответ сервера
+	PetsPerCoin  = 3,
+	SendDelay    = 0.05,
+	LoopInterval = 1.5,
+	StuckTimeout = 8,
+	Debug        = true,
 }
 
 --------------------------------------------------------------------------------
@@ -26,6 +23,11 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
+
+-- Если скрипт запущен повторно, останавливаем старый автофарм
+if _G.PetTools and _G.PetTools.AutoFarm then
+	_G.PetTools.AutoFarm.Stop()
+end
 
 local warned = {}
 local function warnOnce(key, text)
@@ -54,7 +56,6 @@ if not CoinsFolder then
 	return
 end
 
--- Позиция монеты: часть POS, иначе меш Coin
 local function getPos(coin)
 	local p = coin:FindFirstChild("POS") or coin:FindFirstChild("Coin")
 	if p and p:IsA("BasePart") then
@@ -77,11 +78,9 @@ end
 
 --------------------------------------------------------------------------------
 -- 1. МОНЕТЫ
--- Атрибуты (Area, HasLanded...) могут проставляться уже после появления монеты,
--- поэтому локацию читаем в момент запроса, а не при регистрации.
 --------------------------------------------------------------------------------
 local CoinManager = {}
-CoinManager.AllCoins = {} -- [coin] = true
+CoinManager.AllCoins = {}
 
 local function registerCoin(coin)
 	CoinManager.AllCoins[coin] = true
@@ -101,7 +100,6 @@ local function coinLocation(coin)
 	return tostring(coin:GetAttribute(CONFIG.LocationAttr) or "Unknown")
 end
 
--- Имена всех локаций, где сейчас есть монеты
 function CoinManager.GetLocationNames()
 	local set, names = {}, {}
 	for coin in pairs(CoinManager.AllCoins) do
@@ -115,8 +113,6 @@ function CoinManager.GetLocationNames()
 	return names
 end
 
--- Живые монеты, отсортированные по расстоянию от origin.
--- locations: nil (все), строка или список строк.
 function CoinManager.GetCoins(locations, origin)
 	local filter
 	if type(locations) == "string" then
@@ -150,10 +146,9 @@ end
 --------------------------------------------------------------------------------
 -- 2. ПЕТЫ И РЕМОУТ
 --------------------------------------------------------------------------------
--- ID моих петов: дети Pets с атрибутом Owner == мой ник
 local function GetEquippedPetIds()
 	local ids = {}
-	local folder = PetsFolder or Workspace:FindFirstChild("__THINGS") and Workspace.__THINGS:FindFirstChild("Pets")
+	local folder = PetsFolder
 	if not folder then return ids end
 
 	for _, pet in ipairs(folder:GetChildren()) do
@@ -167,68 +162,18 @@ local function GetEquippedPetIds()
 	return ids
 end
 
-local StarterGui = game:GetService("StarterGui")
-
-local function notify(text)
-	pcall(function()
-		StarterGui:SetCore("SendNotification", { Title = "Pets Farm", Text = text, Duration = 6 })
-	end)
-end
-
--- Ремоут запоминается, когда игра сама отправляет петов на монету (твой ручной клик).
--- Признак нужного вызова: InvokeServer("<число>", { "id...", ... }) на RemoteFunction в ReplicatedStorage.
-local learnedRemote
-
-local function startLearning()
-	if not (hookmetamethod and getnamecallmethod) then
-		warn("[Pets] Экзекутор не поддерживает hookmetamethod: авто-определение ремоута недоступно")
-		return
-	end
-
-	local function check(self, a, b)
-		if typeof(self) == "Instance"
-			and self:IsA("RemoteFunction")
-			and self.Parent == ReplicatedStorage
-			and type(a) == "string" and tonumber(a)
-			and type(b) == "table" and type(b[1]) == "string"
-			and string.sub(b[1], 1, 2) == "id"
-		then
-			learnedRemote = self
-			task.defer(function()
-				print("[Pets] Ремоут запомнен: " .. self:GetFullName())
-				notify("Remote saved, farm is ready")
-			end)
-		end
-	end
-
-	local wrap = newcclosure or function(f) return f end
-	local old
-	old = hookmetamethod(game, "__namecall", wrap(function(self, ...)
-		if not learnedRemote and getnamecallmethod() == "InvokeServer" then
-			pcall(check, self, ...)
-		end
-		return old(self, ...)
-	end))
-end
-
-startLearning()
-
+-- Ремоут фиксированный (определён по логу игры)
 local function getRemote()
-	if learnedRemote and learnedRemote.Parent then
-		return learnedRemote
+	local r = ReplicatedStorage:FindFirstChild("RemoteFunction")
+	if r and r:IsA("RemoteFunction") then
+		return r
 	end
-	if not warned.remote then
-		warned.remote = true
-		warn("[Pets] Ремоут ещё не определён: вручную кликни по любой монете, чтобы скрипт его запомнил.")
-		notify("Click any coin once so the script can learn the remote")
-	end
+	warnOnce("remote", "[Pets] ReplicatedStorage.RemoteFunction не найден")
 	return nil
 end
 
--- Кто сейчас на какой монете: [coin] = { pets, lastHealth, lastProgress }
 local assignments = {}
 
--- Один вызов = группа петов на одну монету. true, если вызов отправлен.
 local function sendGroup(coin, petIds)
 	if not coin or not coin.Parent or #petIds == 0 then return false end
 	local remote = getRemote()
@@ -247,14 +192,12 @@ local function sendGroup(coin, petIds)
 			warn("[Pets] Ошибка вызова: " .. tostring(res))
 			assignments[coin] = nil
 		elseif res == false then
-			-- сервер отказал: освобождаем петов, попробуем другую монету
 			assignments[coin] = nil
 		end
 	end)
 	return true
 end
 
--- Делит список петов на группы по PetsPerCoin
 local function chunk(list, size)
 	local groups = {}
 	for i = 1, #list, size do
@@ -272,7 +215,6 @@ end
 --------------------------------------------------------------------------------
 local PetController = {}
 
--- Все петы на одну монету
 function PetController.SendAllToOne(coin)
 	local ids = GetEquippedPetIds()
 	if #ids == 0 then
@@ -286,7 +228,6 @@ function PetController.Reset()
 	assignments = {}
 end
 
--- Отправляет только СВОБОДНЫХ петов на ближайшие монеты без назначенных петов
 function PetController.Distribute(locations)
 	local ids = GetEquippedPetIds()
 	if #ids == 0 then
@@ -298,7 +239,7 @@ function PetController.Distribute(locations)
 	local busy = {}
 	for coin, a in pairs(assignments) do
 		if not coin.Parent then
-			assignments[coin] = nil -- монета разбита, петы свободны
+			assignments[coin] = nil
 		else
 			local hp = coin:GetAttribute("Health")
 			if hp ~= a.lastHealth then
@@ -306,7 +247,7 @@ function PetController.Distribute(locations)
 				a.lastProgress = now
 			end
 			if now - a.lastProgress > CONFIG.StuckTimeout then
-				assignments[coin] = nil -- застряли, переотправим
+				assignments[coin] = nil
 			else
 				for _, id in ipairs(a.pets) do
 					busy[id] = true
@@ -346,7 +287,6 @@ function PetController.Distribute(locations)
 	end
 end
 
--- Группы петов на случайные монеты
 function PetController.Random(locations)
 	local ids = GetEquippedPetIds()
 	local coins = CoinManager.GetCoins(locations, nil)
@@ -361,7 +301,7 @@ end
 --------------------------------------------------------------------------------
 -- 4. АВТОФАРМ
 --------------------------------------------------------------------------------
-local AutoFarm = { Enabled = false, Location = nil } -- Location: nil / строка / список
+local AutoFarm = { Enabled = false, Location = nil }
 
 function AutoFarm.Start(locations)
 	if AutoFarm.Enabled then return end
@@ -391,3 +331,5 @@ _G.PetTools = {
 	AutoFarm = AutoFarm,
 	Config = CONFIG,
 }
+
+print("[Pets] Готово. Запуск: _G.PetTools.AutoFarm.Start()")
