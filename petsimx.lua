@@ -8,6 +8,7 @@ local scripts = {
   'AutoFarm/AutoCollectLootBags.lua',
   'AutoFarm/AutoCollectOrbs.lua',
   'AutoFarm/AutoFarm.lua',
+  'Eggs/EggsOpen.lua',
 }
 
 local baseUrl = 'https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/'
@@ -220,6 +221,201 @@ local EspBubblesToggle = ThingsEventSection:Toggle({
         _G.EspTickets = Value
     end
 })
+
+-------------------------Eggs-----------------------
+-- Логика лежит в Eggs/EggsOpen.lua (он создаёт _G.EggTools при загрузке)
+do
+	local waited = 0
+	while not _G.EggTools and waited < 4 do
+		task.wait(0.25)
+		waited += 0.25
+	end
+end
+
+local EggsCat = Window:Category("Eggs")
+local EggsPage = Window:Page({
+		Name = "Eggs",
+		Icon = "https://i.postimg.cc/6q7p8GSZ/Bez-imeni-2.png",
+		Category = EggsCat
+})
+
+local selectedEgg = nil
+local selectedAmount = 1
+
+local function getEggItems()
+	local tools = _G.EggTools
+	return tools and tools.GetEggNames() or {}
+end
+
+-- Обновление списка в дропдауне (подбираем метод, который есть у твоей библиотеки)
+local function pushItems(dropdown, items)
+	for _, method in ipairs({ "Refresh", "SetItems", "SetOptions", "SetValues" }) do
+		if type(dropdown[method]) == "function" then
+			if pcall(dropdown[method], dropdown, items) then return true end
+		end
+	end
+	return false
+end
+
+local EggsSection = EggsPage:Section({Name = "Auto Open", Side = 1, Icon = "https://i.postimg.cc/tCDF4BRx/Bez-imeni-1.png"})
+
+EggsSection:Paragraph({
+	Name = "Auto Open Eggs",
+	Text = "Pick an egg and an amount, then enable the toggle. Stand near the egg or enable Teleport To Egg."
+})
+
+EggsSection:Divider()
+
+local EggDropdown = EggsSection:Dropdown({
+	Name = "Egg",
+	Tooltip = "Eggs available in the current world",
+	Flag = "EggToOpen",
+	Items = getEggItems(),
+	Multi = false,
+	Size = 125,
+	OptionHolderSize = 125,
+	Callback = function(Value)
+		selectedEgg = normalize(Value)[1]
+	end
+})
+
+local EggAmountDropdown = EggsSection:Dropdown({
+	Name = "Amount",
+	Tooltip = "How many eggs to open per purchase (3 needs the Triple Egg gamepass)",
+	Flag = "EggAmount",
+	Items = { "1", "3" },
+	Default = "1",
+	Multi = false,
+	Size = 60,
+	OptionHolderSize = 60,
+	Callback = function(Value)
+		selectedAmount = tonumber(normalize(Value)[1]) or 1
+	end
+})
+
+local EggOpenToggle = EggsSection:Toggle({
+	Name = "Auto Open Eggs",
+	Tooltip = "Keeps buying the selected egg",
+	Flag = "AutoOpenEggs",
+	Default = false,
+	Callback = function(Value)
+		local tools = _G.EggTools
+		if not tools then
+			Library:Notification({
+				Title = "Eggs",
+				Description = "EggsOpen.lua not loaded. Check console (F9)",
+				Duration = 4
+			})
+			return
+		end
+
+		if Value then
+			if not selectedEgg then
+				Library:Notification({
+					Title = "Eggs",
+					Description = "Select an egg first",
+					Duration = 3
+				})
+				return
+			end
+			tools.AutoOpen.Stop()
+			tools.AutoOpen.Start(selectedEgg, selectedAmount)
+		else
+			tools.AutoOpen.Stop()
+		end
+	end
+})
+
+EggsSection:Button({
+	Name = "Open Once",
+	Tooltip = "Buys the selected egg a single time",
+	Callback = function()
+		local tools = _G.EggTools
+		if not tools or not selectedEgg then
+			Library:Notification({
+				Title = "Eggs",
+				Description = "Select an egg first",
+				Duration = 3
+			})
+			return
+		end
+		task.spawn(function()
+			local ok, msg = tools.OpenOnce(selectedEgg, selectedAmount)
+			Library:Notification({
+				Title = "Eggs",
+				Description = ok and "Opened" or tostring(msg or "Failed"),
+				Duration = 3
+			})
+		end)
+	end
+})
+
+EggsSection:Button({
+	Name = "Refresh Egg List",
+	Tooltip = "Rescan eggs in the current world",
+	Callback = function()
+		local tools = _G.EggTools
+		if not tools then return end
+		task.spawn(function()
+			tools.Refresh()
+			pushItems(EggDropdown, getEggItems())
+		end)
+	end
+})
+
+local EggsOptionsSection = EggsPage:Section({Name = "Options", Side = 2, Icon = "https://i.postimg.cc/cH8VsKQf/Bez-imeni-1.png"})
+
+EggsOptionsSection:Slider({
+	Name = "Open Delay",
+	Tooltip = "Pause between purchases. Lower = faster spam",
+	Flag = "EggDelay",
+	Min = 50,
+	Max = 3000,
+	Default = 300,
+	Suffix = " ms",
+	Decimals = 1
+})
+
+EggsOptionsSection:Toggle({
+	Name = "Teleport To Egg",
+	Tooltip = "Teleports you next to the selected egg if you are far from it",
+	Flag = "EggTeleport",
+	Default = false,
+	Callback = function(Value)
+		local tools = _G.EggTools
+		if tools then tools.AutoOpen.Teleport = Value and true or false end
+	end
+})
+
+EggsOptionsSection:Toggle({
+	Name = "Wait For Hatch Animation",
+	Tooltip = "Enable if the server rejects purchases while an egg is opening",
+	Flag = "EggWaitAnim",
+	Default = false,
+	Callback = function(Value)
+		local tools = _G.EggTools
+		if tools then tools.AutoOpen.WaitAnimation = Value and true or false end
+	end
+})
+
+-- Подхват значения слайдера + автообновление списка яиц
+task.spawn(function()
+	local last = table.concat(getEggItems(), "|")
+	while true do
+		task.wait(3)
+		local tools = _G.EggTools
+		if tools then
+			local ms = tonumber(Library.Flags["EggDelay"]) or 300
+			tools.AutoOpen.Delay = math.max(0.05, ms / 1000)
+		end
+		local items = getEggItems()
+		local sig = table.concat(items, "|")
+		if sig ~= last then
+			last = sig
+			pushItems(EggDropdown, items)
+		end
+	end
+end)
 
 -------------------------Misc-----------------------
 
