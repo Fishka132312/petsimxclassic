@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------
+-------------------------------------------------------------------------------- 32131
 -- КОНФИГ (значения сняты с реальной игры)
 --------------------------------------------------------------------------------
 local CONFIG = {
@@ -16,6 +16,8 @@ local CONFIG = {
 	PetsPerCoin  = 3,    -- сколько петов отправлять на одну монету
 	SendDelay    = 0.05, -- пауза между вызовами
 	LoopInterval = 1.5,  -- как часто автофарм пересчитывает цели
+	StuckTimeout = 8,    -- если у монеты 8 сек не меняется Health, отправляем петов заново
+	Debug        = true, -- печатать в F9 каждую отправку и ответ сервера
 }
 
 --------------------------------------------------------------------------------
@@ -183,21 +185,33 @@ local function getRemote()
 	return nil
 end
 
--- Один вызов = группа петов на одну монету
+-- Кто сейчас на какой монете: [coin] = { pets, lastHealth, lastProgress }
+local assignments = {}
+
+-- Один вызов = группа петов на одну монету. true, если вызов отправлен.
 local function sendGroup(coin, petIds)
-	if not coin or not coin.Parent or #petIds == 0 then return end
+	if not coin or not coin.Parent or #petIds == 0 then return false end
 	local remote = getRemote()
-	if not remote then return end
+	if not remote then return false end
 
 	local coinId = tostring(coin:GetAttribute(CONFIG.IdAttr) or coin.Name)
 	task.spawn(function()
-		local ok, err = pcall(function()
-			remote:InvokeServer(coinId, petIds)
+		local ok, res = pcall(function()
+			return remote:InvokeServer(coinId, petIds)
 		end)
+		if CONFIG.Debug then
+			print(string.format("[Pets] монета %s, петов %d -> ok=%s ответ=%s",
+				coinId, #petIds, tostring(ok), tostring(res)))
+		end
 		if not ok then
-			warn("[Pets] Ошибка вызова: " .. tostring(err))
+			warn("[Pets] Ошибка вызова: " .. tostring(res))
+			assignments[coin] = nil
+		elseif res == false then
+			-- сервер отказал: освобождаем петов, попробуем другую монету
+			assignments[coin] = nil
 		end
 	end)
+	return true
 end
 
 -- Делит список петов на группы по PetsPerCoin
@@ -228,7 +242,11 @@ function PetController.SendAllToOne(coin)
 	sendGroup(coin, ids)
 end
 
--- Группы петов на ближайшие монеты выбранных локаций
+function PetController.Reset()
+	assignments = {}
+end
+
+-- Отправляет только СВОБОДНЫХ петов на ближайшие монеты без назначенных петов
 function PetController.Distribute(locations)
 	local ids = GetEquippedPetIds()
 	if #ids == 0 then
@@ -236,13 +254,54 @@ function PetController.Distribute(locations)
 		return
 	end
 
-	local coins = CoinManager.GetCoins(locations, getRootPos())
-	if #coins == 0 then return end
+	local now = os.clock()
+	local busy = {}
+	for coin, a in pairs(assignments) do
+		if not coin.Parent then
+			assignments[coin] = nil -- монета разбита, петы свободны
+		else
+			local hp = coin:GetAttribute("Health")
+			if hp ~= a.lastHealth then
+				a.lastHealth = hp
+				a.lastProgress = now
+			end
+			if now - a.lastProgress > CONFIG.StuckTimeout then
+				assignments[coin] = nil -- застряли, переотправим
+			else
+				for _, id in ipairs(a.pets) do
+					busy[id] = true
+				end
+			end
+		end
+	end
 
-	local groups = chunk(ids, math.max(1, CONFIG.PetsPerCoin))
-	for i, group in ipairs(groups) do
-		local coin = coins[((i - 1) % #coins) + 1]
-		sendGroup(coin, group)
+	local free = {}
+	for _, id in ipairs(ids) do
+		if not busy[id] then
+			free[#free + 1] = id
+		end
+	end
+	if #free == 0 then return end
+
+	local targets = {}
+	for _, coin in ipairs(CoinManager.GetCoins(locations, getRootPos())) do
+		if not assignments[coin] then
+			targets[#targets + 1] = coin
+		end
+	end
+	if #targets == 0 then return end
+
+	for i, group in ipairs(chunk(free, math.max(1, CONFIG.PetsPerCoin))) do
+		local coin = targets[i]
+		if not coin then break end
+		assignments[coin] = {
+			pets = group,
+			lastHealth = coin:GetAttribute("Health"),
+			lastProgress = now,
+		}
+		if not sendGroup(coin, group) then
+			assignments[coin] = nil
+		end
 		task.wait(CONFIG.SendDelay)
 	end
 end
@@ -268,10 +327,14 @@ function AutoFarm.Start(locations)
 	if AutoFarm.Enabled then return end
 	AutoFarm.Enabled = true
 	AutoFarm.Location = locations
+	PetController.Reset()
 
 	task.spawn(function()
 		while AutoFarm.Enabled do
-			PetController.Distribute(AutoFarm.Location)
+			local ok, err = pcall(PetController.Distribute, AutoFarm.Location)
+			if not ok then
+				warn("[Pets] Ошибка в цикле: " .. tostring(err))
+			end
 			task.wait(CONFIG.LoopInterval)
 		end
 	end)
