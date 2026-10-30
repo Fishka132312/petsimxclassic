@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------
+--------------------------------------------------------------------------------1111
 -- КОНФИГ
 --------------------------------------------------------------------------------
 local CONFIG = {
@@ -107,8 +107,9 @@ do
 		local orig
 		orig = hookfunction(Network.Invoke, function(...)
 			if not _G.PetsPrefix then
+				-- ВАЖНО: ... можно использовать только здесь, не во вложенной функции
+				local args = table.pack(...)
 				pcall(function()
-					local args = table.pack(...)
 					for i = 1, args.n - 1 do
 						local a, b = args[i], args[i + 1]
 						if type(a) == "string" and tonumber(a)
