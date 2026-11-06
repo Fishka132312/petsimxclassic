@@ -246,7 +246,7 @@ task.spawn(function()
 	end
 end)
 
-local CollectSection = EventPage:Section({ Name = "Collect & Stats", Side = 2, Icon = "https://i.postimg.cc/cH8VsKQf/Bez-imeni-1.png" })
+local CollectSection = EventPage:Section({ Name = "Collect & Stats", Side = 2, Icon = "https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Icons/stats.png" })
 
 CollectSection:Paragraph({
 	Name = "Collect",
@@ -312,7 +312,7 @@ do
 	dprint("яиц на старте:", #getEggItems())
 end
 
-local EggSection = EggsPage:Section({ Name = "Egg Opener", Side = 1 })
+local EggSection = EggsPage:Section({ Name = "Egg Opener", Side = 1 Icon = "https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Icons/eggs.png" })
 
 local EggInfo = EggSection:Paragraph({
 	Name = "Status",
@@ -507,7 +507,7 @@ task.spawn(function()
 	end
 end)
 
-local QuickSection = EggsPage:Section({ Name = "Quick Open", Side = 2 })
+local QuickSection = EggsPage:Section({ Name = "Quick Open", Side = 2 Icon = "https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Icons/quick_open.png" })
 
 QuickSection:Paragraph({
 	Name = "Quick Open",
@@ -563,7 +563,7 @@ local AutoPage = Window:Page({
 	Category = AutoCat
 })
 
-local CraftSection = AutoPage:Section({ Name = "Crafting", Side = 1 })
+local CraftSection = AutoPage:Section({ Name = "Crafting", Side = 1 Icon = "https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Icons/crafting.png" })
 
 local CraftInfo = CraftSection:Paragraph({
 	Name = "Status",
@@ -623,7 +623,7 @@ task.spawn(function()
 	end
 end)
 
-local IndexSection = AutoPage:Section({ Name = "Index", Side = 2 })
+local IndexSection = AutoPage:Section({ Name = "Index", Side = 2 Icon = "https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Icons/index.png" })
 
 local IndexInfo = IndexSection:Paragraph({
 	Name = "Status",
