@@ -6,6 +6,9 @@ local CONFIG = {
 	MaxFailures      = 5,  -- столько неудач подряд -> автооткрытие останавливается
 	FailDelay        = 1,  -- пауза после неудачной покупки
 	RescanInterval   = 15, -- как часто пересканировать яйца на карте
+	TeleportRetries  = 4,  -- кругов попыток телепорта в другой мир (в каждом пробуются 3 способа)
+	WorldLoadTimeout = 25, -- сколько ждать загрузку мира после телепорта (сек)
+	EggWaitTimeout   = 12, -- сколько ждать появления модели яйца после телепорта (сек)
 	Debug            = false,
 }
 
@@ -151,10 +154,18 @@ end
 --------------------------------------------------------------------------------
 -- 2. ПОИСК ЯИЦ НА КАРТЕ
 --------------------------------------------------------------------------------
+local function currentMap()
+	local wc = Lib and Lib.WorldCmds
+	if wc and wc.GetMap then
+		local ok, m = pcall(wc.GetMap)
+		if ok and typeof(m) == "Instance" and m.Parent then return m end
+	end
+	return Workspace:FindFirstChild("__MAP")
+end
+
 local function scanEggs()
 	local found = {}
-	local map = Workspace:FindFirstChild("__MAP")
-	local root = map or Workspace
+	local root = currentMap() or Workspace
 	local n = 0
 	for _, d in ipairs(root:GetDescendants()) do
 		n = n + 1
@@ -195,6 +206,259 @@ local function nearestEgg(eggId)
 	return best, bestCenter, bestDist
 end
 
+
+--------------------------------------------------------------------------------
+-- 2.5. ТЕЛЕПОРТ МЕЖДУ МИРАМИ (логика взята из AutoIndex)
+-- Яйцо -> Directory.Eggs[яйцо].area -> Directory.Areas[area].world.
+-- Если мир другой (или модель яйца не загружена) — телепортируемся в область
+-- яйца, ждём загрузку мира и только потом идём к самому яйцу.
+--------------------------------------------------------------------------------
+local isExec = isexecutorclosure or checkclosure or function() return false end
+
+local function curWorld()
+	local wc = Lib and Lib.WorldCmds
+	if not (wc and wc.Get) then return nil end
+	local ok, w = pcall(wc.Get)
+	return ok and w or nil
+end
+
+-- яйцо -> имя области, мир
+local function eggLocation(eggId)
+	local d = getLib() and Lib.Directory
+	local egg = d and d.Eggs and d.Eggs[eggId]
+	local areaName = egg and egg.area
+	local area = areaName and d.Areas and d.Areas[areaName]
+	return areaName, area and area.world
+end
+
+-- доступна ли область игроку (мир открыт, область открыта, телепорт куплен)
+local function areaAccessible(areaName)
+	local d = getLib() and Lib.Directory
+	local area = d and d.Areas and d.Areas[areaName]
+	if not area or area.hidden then return false end
+	local wc = Lib.WorldCmds
+	local ok, res = pcall(function()
+		return wc.HasAccess(area.world) and wc.HasArea(areaName) and wc.HasTeleport(areaName)
+	end)
+	return ok and res and true or false
+end
+
+local function waitCanAct(sec, alive)
+	local t0 = os.clock()
+	while alive() and os.clock() - t0 < sec do
+		local oe = Lib and Lib.Variables and Lib.Variables.OpeningEgg
+		local busy = oe and oe > 0
+		if not busy and Lib and Lib.WorldCmds and Lib.WorldCmds.CanDoAction then
+			local ok, res = pcall(Lib.WorldCmds.CanDoAction)
+			busy = ok and res == false
+		end
+		if not busy then return end
+		task.wait(0.1)
+	end
+end
+
+local function arrivedAt(areaName)
+	local d = Lib and Lib.Directory
+	local area = d and d.Areas and d.Areas[areaName]
+	if not area or curWorld() ~= area.world then return false end
+	local ok, map = pcall(Lib.WorldCmds.GetMap)
+	return ok and typeof(map) == "Instance" and map.Parent ~= nil and map:FindFirstChild("Teleports") ~= nil
+end
+
+local function waitArrived(areaName, sec, alive)
+	local t0 = os.clock()
+	local started = false
+	task.wait(0.3)
+	while alive() and os.clock() - t0 < sec do
+		if Lib.Variables.Teleporting then started = true end
+		if not Lib.Variables.Teleporting and arrivedAt(areaName) then
+			local c0 = os.clock()
+			while not getRoot() and os.clock() - c0 < 10 do task.wait(0.2) end
+			return true
+		end
+		if not started and os.clock() - t0 > 4 then return false end -- телепорт даже не начался
+		task.wait(0.2)
+	end
+	return false
+end
+
+-- запасной ручной телепорт (если функцию игры найти не удалось)
+local function manualTeleport(areaName)
+	local wc = Lib.WorldCmds
+	local d = Lib.Directory
+	if Lib.Variables.Teleporting then return false, "You are already teleporting!" end
+	if not wc.CanDoAction() then return false, "Cannot perform actions right now" end
+	local a = d.Areas[areaName]
+	if not a then return false, "Unknown area!" end
+	if not (wc.HasAccess(a.world) and wc.HasArea(areaName) and wc.HasTeleport(areaName)) then
+		return false, "нет доступа к миру/области или не куплен телепорт"
+	end
+	if wc.Get() ~= a.world and not wc.Load(a.world) then return false, "World failed to load!" end
+	local map = wc.GetMap()
+	local tp = map and map.Teleports and map.Teleports:FindFirstChild(areaName)
+	if not tp then return false, "No such teleport for area!" end
+	local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	local hum = char:WaitForChild("Humanoid")
+	local root = char:WaitForChild("HumanoidRootPart")
+	Lib.Variables.Teleporting = true
+	Lib.Signal.Fire("Teleporting")
+	task.wait(0.25)
+	local cf = tp.CFrame
+	char:PivotTo(cf + cf.UpVector * (hum.HipHeight + root.Size.Y / 2))
+	pcall(Lib.Network.Fire, "Performed Teleport", areaName)
+	task.wait(0.25)
+	Lib.Variables.Teleporting = false
+	return true
+end
+
+local TeleportFn
+local function getTeleportFn()
+	if TeleportFn then return TeleportFn end
+	if getsenv then
+		for _, d in ipairs(LocalPlayer.PlayerScripts:GetDescendants()) do
+			if d.Name == "Teleport" and (d:IsA("LocalScript") or d:IsA("ModuleScript")) then
+				local ok, senv = pcall(getsenv, d)
+				if ok and type(senv) == "table" and type(senv.Teleport) == "function" then
+					TeleportFn = senv.Teleport
+					return TeleportFn
+				end
+			end
+		end
+	end
+	if getgc and islclosure and debug.info then
+		for _, f in ipairs(getgc()) do
+			if type(f) == "function" and islclosure(f) and not isExec(f) and debug.info(f, "n") == "Teleport" then
+				local ok, consts = pcall(debug.getconstants, f)
+				if not ok or type(consts) ~= "table" or table.find(consts, "You are already teleporting!") then
+					TeleportFn = f
+					return TeleportFn
+				end
+			end
+		end
+	end
+	TeleportFn = manualTeleport
+	return TeleportFn
+end
+
+local function viaGame(areaName)
+	local ok, success, msg = pcall(getTeleportFn(), areaName)
+	if not ok then
+		Lib.Variables.Teleporting = false -- функция игры упала и оставила флаг включённым
+		return false, tostring(success)
+	end
+	if not success then return false, tostring(msg) end
+	return true
+end
+
+local function viaUI(areaName)
+	local gui = Lib.GUI and Lib.GUI.Teleport
+	local holder = gui and gui.Holder
+	local btn = holder and holder:FindFirstChild(areaName)
+	if not btn then return false, "кнопка области «" .. areaName .. "» не найдена" end
+	local fired = false
+	if firesignal then fired = pcall(firesignal, btn.Activated) end
+	if not fired and getconnections then
+		local okC, conns = pcall(getconnections, btn.Activated)
+		if okC and type(conns) == "table" then
+			for _, c in ipairs(conns) do
+				if pcall(function() c:Fire() end) then fired = true end
+			end
+		end
+	end
+	if not fired then return false, "firesignal/getconnections недоступны в этом executor" end
+	task.wait(0.6)
+	return true
+end
+
+local function viaForce(areaName)
+	local ok, res, msg = pcall(Lib.Network.Invoke, "Force Teleport", areaName)
+	if not ok then return false, tostring(res) end
+	if res == false then return false, tostring(msg) end
+	return true
+end
+
+local STRATEGIES = {
+	{ "функция игры", viaGame },
+	{ "кнопка в окне Teleport", viaUI },
+	{ "Force Teleport", viaForce },
+}
+
+-- Телепорт в область с проверкой, что мир реально сменился
+local function safeTeleport(areaName, alive)
+	local lastErr = "unknown"
+	for attempt = 1, CONFIG.TeleportRetries do
+		if not alive() then return false, "остановлено" end
+		for _, st in ipairs(STRATEGIES) do
+			if not alive() then return false, "остановлено" end
+			waitCanAct(20, alive) -- ждём конец анимации яйца
+			local okS, errS = st[2](areaName)
+			if okS and waitArrived(areaName, CONFIG.WorldLoadTimeout, alive) then
+				task.wait(0.3)
+				return true
+			end
+			errS = tostring(errS or "телепорт не начался / мир не загрузился")
+			lastErr = st[1] .. ": " .. errS
+			log(string.format("телепорт в «%s» (%s, попытка %d/%d): %s | мир сейчас: %s",
+				areaName, st[1], attempt, CONFIG.TeleportRetries, errS, tostring(curWorld())))
+			if errS:find("do not have access", 1, true) or errS:find("do not own", 1, true)
+				or errS:find("Unknown area", 1, true) or errS:find("нет доступа", 1, true) then
+				return false, lastErr
+			end
+			if errS:find("already teleporting", 1, true) then
+				if attempt >= 3 then Lib.Variables.Teleporting = false end
+				break
+			end
+			if errS:find("Cannot perform actions", 1, true) or errS:find("right now", 1, true) then
+				break
+			end
+		end
+		if attempt < CONFIG.TeleportRetries then task.wait(0.5) end
+	end
+	return false, lastErr
+end
+
+-- Главная функция: оказаться у яйца (сменить мир, если надо, потом подойти).
+local function goToEgg(eggId, alive)
+	alive = alive or function() return true end
+	getLib()
+	local areaName, world = eggLocation(eggId)
+	local egg, center, dist = nearestEgg(eggId)
+
+	local wrongWorld = world ~= nil and curWorld() ~= nil and curWorld() ~= world
+	if wrongWorld or not center then
+		if not areaName then
+			return false, "яйцо «" .. tostring(eggId) .. "» не найдено ни на карте, ни в директории игры"
+		end
+		if not areaAccessible(areaName) then
+			return false, "нет доступа к области «" .. areaName .. "» (мир «" .. tostring(world) .. "»)"
+		end
+		log(string.format("яйцо «%s»: область «%s», мир «%s» (сейчас «%s») — телепортируюсь",
+			eggId, areaName, tostring(world), tostring(curWorld())))
+		local ok, err = safeTeleport(areaName, alive)
+		if not ok then return false, "телепорт в мир не удался: " .. tostring(err) end
+
+		-- ждём, пока в новом мире появится модель яйца
+		local deadline = os.clock() + CONFIG.EggWaitTimeout
+		repeat
+			scanEggs()
+			egg, center, dist = nearestEgg(eggId)
+			if not center then task.wait(0.5) end
+		until center or os.clock() > deadline or not alive()
+		if not center then
+			return false, "модель яйца «" .. tostring(eggId) .. "» не появилась после телепорта"
+		end
+	end
+
+	if dist and dist > CONFIG.TeleportDistance then
+		local rootPart = getRoot()
+		if rootPart then
+			rootPart.CFrame = CFrame.new(center.Position + Vector3.new(0, 3, 6))
+			task.wait(0.3)
+		end
+	end
+	return true
+end
+
 --------------------------------------------------------------------------------
 -- 3. ОТКРЫТИЕ ЯИЦ
 --------------------------------------------------------------------------------
@@ -203,17 +467,39 @@ local EggTools = {}
 function EggTools.Refresh() scanEggs() end
 
 function EggTools.GetEggNames()
-	local names = {}
+	local set = {}
+	-- яйца текущей карты
 	for id, list in pairs(eggCache) do
 		for _, inst in ipairs(list) do
 			if inst.Parent and inst:GetAttribute("Unlocked") ~= false then
-				names[#names + 1] = id
+				set[id] = true
 				break
 			end
 		end
 	end
+	-- яйца из других миров (по директории игры, только доступные тебе)
+	local d = getLib() and Lib.Directory
+	if d and type(d.Eggs) == "table" then
+		for id, egg in pairs(d.Eggs) do
+			if type(id) == "string" and type(egg) == "table" and egg.area and areaAccessible(egg.area) then
+				set[id] = true
+			end
+		end
+	end
+	local names = {}
+	for id in pairs(set) do names[#names + 1] = id end
 	table.sort(names)
 	return names
+end
+
+-- В каком мире/области лежит яйцо: возвращает area, world
+function EggTools.GetEggLocation(eggId)
+	return eggLocation(eggId)
+end
+
+-- Телепортироваться к яйцу (со сменой мира, если надо). Возвращает ok, ошибка
+function EggTools.GoToEgg(eggId)
+	return goToEgg(eggId)
 end
 
 -- Пойман ли ремоут (true/false) и с каким яйцом
@@ -306,14 +592,21 @@ function AutoOpen.Start(eggId, amount)
 		while AutoOpen.Enabled and AutoOpen.Token == token do
 			local id = AutoOpen.Egg
 
+			local alive = function() return AutoOpen.Enabled and AutoOpen.Token == token end
+
 			if AutoOpen.Teleport then
-				local egg, center, dist = nearestEgg(id)
-				if egg and center and dist and dist > CONFIG.TeleportDistance then
-					local rootPart = getRoot()
-					if rootPart then
-						rootPart.CFrame = CFrame.new(center.Position + Vector3.new(0, 3, 6))
-						task.wait(0.3)
+				-- сменит мир, если яйцо в другом, и подойдёт к нему
+				local okTp, errTp = goToEgg(id, alive)
+				if not okTp then
+					fails = fails + 1
+					warn(string.format("[Eggs] Телепорт к яйцу не вышел (%d/%d): %s", fails, CONFIG.MaxFailures, tostring(errTp)))
+					if fails >= CONFIG.MaxFailures then
+						AutoOpen.Enabled = false
+						notify("Stopped: " .. tostring(errTp))
+						break
 					end
+					task.wait(CONFIG.FailDelay)
+					continue
 				end
 			end
 
@@ -527,4 +820,6 @@ end)
 task.spawn(getLib)
 
 print("[Eggs] Готово. Открой яйцо вручную ОДИН раз (скрипт поймает ремоут), затем _G.EggTools.AutoOpen.Start('Cracked Egg', 3) / .Stop()")
+print("[Eggs] Телепорт со сменой мира: _G.EggTools.AutoOpen.Teleport = true, затем Start('Название яйца', 3)")
+print("[Eggs] Список доступных яиц (всех миров): _G.EggTools.GetEggNames(); мир яйца: _G.EggTools.GetEggLocation('Название')")
 print("[Eggs] Анимация яиц: _G.NoEggAnimation = true / false")
