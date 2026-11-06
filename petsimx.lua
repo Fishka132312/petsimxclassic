@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----322
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----33
 local CheatName = "Evade"
 
 local Players = game:GetService("Players")
@@ -28,6 +28,7 @@ local scripts = {
 }
 
 local baseUrl = 'https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/'
+local failedScripts = {}
 
 for i, scriptName in ipairs(scripts) do
     local fullUrl = baseUrl .. scriptName
@@ -38,11 +39,13 @@ for i, scriptName in ipairs(scripts) do
             loadstring(code)()
         else
             warn("Не удалось получить код для: " .. scriptName)
+            table.insert(failedScripts, scriptName)
         end
     end)
     
     if not success then
         warn("Ошибка при загрузке " .. scriptName .. ": " .. tostring(err))
+        table.insert(failedScripts, scriptName)
     end
     
     task.wait(0.5)
@@ -54,8 +57,21 @@ Library.Folders = {
     Assets = CheatName .. "/Assets",
 }
 
-local Accent = Color3.fromRGB(0, 162, 255)
-local Gradient = Color3.fromRGB(0, 80, 180)
+-- ===== ТЕМА =====
+-- Поменяй THEME на: "Neon" | "Ocean" | "Toxic" | "Sunset" | "Rose"
+local THEME = "Neon"
+
+local THEMES = {
+	Neon   = { Accent = Color3.fromRGB(150, 90, 255),  Gradient = Color3.fromRGB(255, 70, 170) },
+	Ocean  = { Accent = Color3.fromRGB(0, 162, 255),   Gradient = Color3.fromRGB(0, 80, 180)   },
+	Toxic  = { Accent = Color3.fromRGB(80, 255, 140),  Gradient = Color3.fromRGB(0, 160, 110)  },
+	Sunset = { Accent = Color3.fromRGB(255, 150, 50),  Gradient = Color3.fromRGB(235, 50, 90)  },
+	Rose   = { Accent = Color3.fromRGB(255, 110, 170), Gradient = Color3.fromRGB(150, 60, 220) },
+}
+
+local picked = THEMES[THEME] or THEMES.Neon
+local Accent = picked.Accent
+local Gradient = picked.Gradient
 
 Library.Theme.Accent = Accent
 Library.Theme.AccentGradient = Gradient
@@ -230,29 +246,34 @@ task.spawn(function()
 	end
 end)
 
-local AutoFarmToggle = AutoFarmSection:Toggle({
-    Name = "Auto Collect LootBags/Orbs",
-	Tooltip = "Automatically collects Orbs And Lootbags",
-    Flag = "AutoCollectOrbsLootbags",
-    Default = false,
-    Callback = function(Value)
-        _G.AutoCollectOrbsLootbags = Value
-    end
+local CollectSection = EventPage:Section({ Name = "Collect & Stats", Side = 2, Icon = "https://i.postimg.cc/cH8VsKQf/Bez-imeni-1.png" })
+
+CollectSection:Paragraph({
+	Name = "Collect",
+	Text = "Grabs drops around you and shows your farm stats per hour."
 })
 
-local AutoFarmToggle = AutoFarmSection:Toggle({
-    Name = "Stats",
-	Tooltip = "Showing stats per hour",
-    Flag = "StatsFarm",
-    Default = false,
-    Callback = function(Value)
-        _G.StatsFarm  = Value
-    end
+CollectSection:Divider()
+
+local AutoCollectToggle = CollectSection:Toggle({
+	Name = "Auto Collect LootBags/Orbs",
+	Tooltip = "Automatically collects orbs and lootbags near you",
+	Flag = "AutoCollectOrbsLootbags",
+	Default = false,
+	Callback = function(Value)
+		_G.AutoCollectOrbsLootbags = Value
+	end
 })
 
-
-
-local ThingsEventSection = EventPage:Section({Name = "Things", Side = 2, icon = "https://i.postimg.cc/cH8VsKQf/Bez-imeni-1.png"})
+local StatsToggle = CollectSection:Toggle({
+	Name = "Stats",
+	Tooltip = "Shows farm stats per hour on screen",
+	Flag = "StatsFarm",
+	Default = false,
+	Callback = function(Value)
+		_G.StatsFarm = Value
+	end
+})
 
 
 
@@ -486,11 +507,18 @@ task.spawn(function()
 	end
 end)
 
-local EggSection = EggsPage:Section({ Name = "Egg Opener1", Side = 2 })
+local QuickSection = EggsPage:Section({ Name = "Quick Open", Side = 2 })
 
-local AutoOpenToggle = EggSection:Toggle({
+QuickSection:Paragraph({
+	Name = "Quick Open",
+	Text = "No setup needed: repeats the last egg you opened."
+})
+
+QuickSection:Divider()
+
+local AutoOpenToggle = QuickSection:Toggle({
     Name = "Just Auto Open",
-	Tooltip = "AutoOpenLastEgg",
+	Tooltip = "Keeps opening the last egg you opened manually",
     Flag = "AutoOpenLastEgg",
     Default = false,
     Callback = function(Value)
@@ -498,7 +526,7 @@ local AutoOpenToggle = EggSection:Toggle({
     end
 })
 
-local NoAnimToggle = EggSection:Toggle({
+local NoAnimToggle = QuickSection:Toggle({
 	Name = "No Egg Animation",
 	Tooltip = "Opens eggs instantly, without the hatch animation",
 	Flag = "NoEggAnimation",
@@ -595,9 +623,18 @@ task.spawn(function()
 	end
 end)
 
-local AutoIndexToggle = CraftSection:Toggle({
+local IndexSection = AutoPage:Section({ Name = "Index", Side = 2 })
+
+IndexSection:Paragraph({
+	Name = "Pet Index",
+	Text = "Hatches and crafts pets to fill your collection index."
+})
+
+IndexSection:Divider()
+
+local AutoIndexToggle = IndexSection:Toggle({
 	Name = "Auto Index",
-	Tooltip = "Hatching, craftings pets for ur index",
+	Tooltip = "Hatches and crafts pets to complete your index",
 	Flag = "AutoIndex",
 	Default = false,
 	Callback = function(Value)
@@ -607,121 +644,140 @@ local AutoIndexToggle = CraftSection:Toggle({
 
 -------------------------Misc-----------------------
 
+local GameCat = Window:Category("Game")
 local MiscPage = Window:Page({
-		Name = "Misc",
-		Icon = "https://i.postimg.cc/CxnfNm71/Bez-imeni-1.png",
-		Category = GameCat
+	Name = "Misc",
+	Icon = "https://i.postimg.cc/CxnfNm71/Bez-imeni-1.png",
+	Category = GameCat
 })
 
---Misc--
-local MiscSection = MiscPage:Section({Name = "Misc", Side = 1, Icon = "https://i.postimg.cc/CxnfNm71/Bez-imeni-1.png"})
+--Performance--
+local PerfSection = MiscPage:Section({ Name = "Performance", Side = 1, Icon = "https://i.postimg.cc/CxnfNm71/Bez-imeni-1.png" })
 
-MiscSection:Button({
-    Name = "Anti Afk",
-    Callback = function()
-        loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Misc/AntiAfk.lua'))()
-    end
+PerfSection:Paragraph({
+	Name = "Boost FPS",
+	Text = "Pick an Anti Lag level and cap your FPS to keep the game smooth."
 })
 
-local AntiLagToggle = MiscSection:Toggle({
-    Name = "AntiLag1",
-	Tooltip = "AntiLag1",
-    Flag = "AntiLag1",
-    Default = false,
-    Callback = function(Value)
-        _G.AntiLagEnabled = Value
-    end
+PerfSection:Divider()
+
+PerfSection:Toggle({
+	Name = "Anti Lag 1",
+	Tooltip = "Lag reduction, level 1",
+	Flag = "AntiLag1",
+	Default = false,
+	Callback = function(Value)
+		_G.AntiLagEnabled = Value
+	end
 })
 
-local AntiLagToggle = MiscSection:Toggle({
-    Name = "AntiLag2",
-	Tooltip = "AntiLag2",
-    Flag = "AntiLag2",
-    Default = false,
-    Callback = function(Value)
-        _G.AntiLag2Enabled = Value
-    end
+PerfSection:Toggle({
+	Name = "Anti Lag 2",
+	Tooltip = "Lag reduction, level 2",
+	Flag = "AntiLag2",
+	Default = false,
+	Callback = function(Value)
+		_G.AntiLag2Enabled = Value
+	end
 })
 
-local AntiLagToggle = MiscSection:Toggle({
-    Name = "AntiLag3",
-	Tooltip = "AntiLag3",
-    Flag = "AntiLag3",
-    Default = false,
-    Callback = function(Value)
-        _G.AntiLag3Enabled = Value
-    end
+PerfSection:Toggle({
+	Name = "Anti Lag 3",
+	Tooltip = "Lag reduction, level 3",
+	Flag = "AntiLag3",
+	Default = false,
+	Callback = function(Value)
+		_G.AntiLag3Enabled = Value
+	end
 })
 
-local AntiLagToggle = MiscSection:Toggle({
-    Name = "AntiLag4",
-	Tooltip = "AntiLag4",
-    Flag = "AntiLag4",
-    Default = false,
-    Callback = function(Value)
-        _G.AntiLag4Enabled = Value
-    end
+PerfSection:Toggle({
+	Name = "Anti Lag 4",
+	Tooltip = "Lag reduction, level 4 (strongest)",
+	Flag = "AntiLag4",
+	Default = false,
+	Callback = function(Value)
+		_G.AntiLag4Enabled = Value
+	end
 })
 
-local Disable3dRenderToggle = MiscSection:Toggle({
-    Name = "Disable 3d Render",
-	Tooltip = "Disables world rendering. FPS boost",
-    Flag = "Disable3d",
-    Default = false,
-    Callback = function(Value)
-       local RunService = game:GetService("RunService")
-        RunService:Set3dRenderingEnabled(not Value)
-    end
+PerfSection:Toggle({
+	Name = "Disable 3D Render",
+	Tooltip = "Disables world rendering. Big FPS boost, screen goes black",
+	Flag = "Disable3d",
+	Default = false,
+	Callback = function(Value)
+		game:GetService("RunService"):Set3dRenderingEnabled(not Value)
+	end
 })
 
-CraftSection:Button({
-    Name = "Rejoin",
-    Callback = function()
-        loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Misc/Rejoin.lua'))()
-    end
+PerfSection:Slider({
+	Name = "FPS Cap",
+	Tooltip = "Frame limit. Press Apply FPS Cap to use it",
+	Flag = "FpsCap",
+	Min = 25,
+	Max = 240,
+	Default = 60,
+	Suffix = " fps",
+	Decimals = 1
 })
 
+PerfSection:Button({
+	Name = "Apply FPS Cap",
+	Tooltip = "Applies the selected FPS cap",
+	Callback = function()
+		local Value = Library.Flags["FpsCap"]
 
-MiscSection:Button({
-    Name = "Remote Spy",
-    Callback = function()
-        loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/Evade/refs/heads/main/Things/Misc/RemoteSpy.lua'))()
-    end
+		if setfpscap then
+			setfpscap(Value)
+
+			Library:Notification({
+				Title = "Performance",
+				Description = "FPS cap set to " .. Value,
+				Duration = 3
+			})
+		else
+			Library:Notification({
+				Title = "Error",
+				Description = "Your executor doesn't support setfpscap",
+				Duration = 4
+			})
+		end
+	end
 })
 
-MiscSection:Slider({
-    Name = "FPS Cap",
-    Tooltip = "Frame limit. Apply using the button below",
-    Flag = "FpsCap",
-    Min = 25,
-    Max = 240,
-    Default = 60,
-    Suffix = " fps",
-    Decimals = 1
+--Utility--
+local UtilSection = MiscPage:Section({ Name = "Utility", Side = 2, Icon = "https://i.postimg.cc/CxnfNm71/Bez-imeni-1.png" })
+
+UtilSection:Paragraph({
+	Name = "Tools",
+	Text = "Handy extras: stay online, reconnect, inspect remotes."
 })
 
-MiscSection:Button({
-    Name = "Apply FPS Cap",
-    Tooltip = "Apply the selected FPS Cap",
-    Callback = function()
-        local Value = Library.Flags["FpsCap"]
+UtilSection:Divider()
 
-        if setfpscap then
-            setfpscap(Value)
+UtilSection:Button({
+	Name = "Anti AFK",
+	Tooltip = "Stops the game from kicking you for being idle",
+	Callback = function()
+		loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Misc/AntiAfk.lua'))()
+	end
+})
 
-            Library:Notification({
-                Title = "Performance",
-                Description = "FPS cap set to " .. Value,
-                Duration = 3
-            })
-        else
-            Library:Notification({
-                Title = "Error",
-                Description = "Exec dont support setfpscap",
-                Duration = 4
-            })
-        end
-    end
+UtilSection:Button({
+	Name = "Rejoin",
+	Tooltip = "Rejoins the game",
+	Callback = function()
+		loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Misc/Rejoin.lua'))()
+	end
+})
+
+UtilSection:Button({
+	Name = "Remote Spy",
+	Tooltip = "Opens Remote Spy to watch remote calls",
+	Callback = function()
+		loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/Evade/refs/heads/main/Things/Misc/RemoteSpy.lua'))()
+	end
 })
 
 -------------------------Custom-----------------------
@@ -767,9 +823,18 @@ task.spawn(function()
 	end
 end)
 
-local PetsChangerToggle = CraftSection:Toggle({
+local CustomPetsSection = CustomPage:Section({ Name = "Pets & Unlocks", Side = 2 })
+
+CustomPetsSection:Paragraph({
+	Name = "Customize",
+	Text = "Change how your pets look and unlock extra items (visual, client-side)."
+})
+
+CustomPetsSection:Divider()
+
+local PetsChangerToggle = CustomPetsSection:Toggle({
 	Name = "Pets Changer",
-	Tooltip = "You can change youre pets to any and open eggs/gifts",
+	Tooltip = "Change your pets to any other pet, works with eggs and gifts too",
 	Flag = "PetsChanger",
 	Default = false,
 	Callback = function(Value)
@@ -777,11 +842,26 @@ local PetsChangerToggle = CraftSection:Toggle({
 	end
 })
 
-CraftSection:Button({
-    Name = "Unlock Hoverboards",
-    Callback = function()
-        loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Custom/UnlockAllHoverboard.lua'))()
-    end
+local hoverboardsBusy = false
+CustomPetsSection:Button({
+	Name = "Unlock Hoverboards",
+	Tooltip = "Unlocks all hoverboards on your client",
+	Callback = function()
+		if hoverboardsBusy then return end
+		hoverboardsBusy = true
+		task.spawn(function()
+			local ok, err = pcall(function()
+				loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Custom/UnlockAllHoverboard.lua'))()
+			end)
+			Library:Notification({
+				Title = "Hoverboards",
+				Description = ok and "Hoverboards unlocked" or ("Failed: " .. tostring(err)),
+				Duration = 3
+			})
+			task.wait(2)
+			hoverboardsBusy = false
+		end)
+	end
 })
 
 local SettingsCat = Window:Category("Settings")
@@ -791,3 +871,17 @@ table.insert(SettingsCat.Elements, UiPage)
 local SettingsPage = Library:CreateSettingsPage(Window, KeybindList)
 table.insert(SettingsCat.Elements, SettingsPage)
 Window:Init()
+
+task.defer(function()
+	local desc = "All modules loaded"
+	if #failedScripts > 0 then
+		desc = "Failed to load: " .. table.concat(failedScripts, ", ")
+	end
+	pcall(function()
+		Library:Notification({
+			Title = "Pet Sim X",
+			Description = desc,
+			Duration = 5
+		})
+	end)
+end)
