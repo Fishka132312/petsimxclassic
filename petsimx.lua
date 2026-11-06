@@ -11,8 +11,7 @@ local function dprint(...)
 end
 
 local scripts = {
-  'AutoFarm/AutoCollectLootBags.lua',
-  'AutoFarm/AutoCollectOrbs.lua',
+  'AutoFarm/AutoCollectOrbsLootBags.lua',
   'AutoFarm/AutoFarm.lua',
   -- 'Eggs/EggsOpen.lua', -- раскомментируй, если нужна вкладка Eggs
 }
@@ -221,24 +220,15 @@ task.spawn(function()
 end)
 
 local AutoFarmToggle = AutoFarmSection:Toggle({
-    Name = "Auto Collect LootBags",
+    Name = "Auto Collect LootBags/Orbs",
 	Tooltip = "Automatically collects event bubbles on the map",
-    Flag = "AutoCollectLootBags",
+    Flag = "AutoCollectOrbsLootbags",
     Default = false,
     Callback = function(Value)
-        _G.AutoCollectLootBags = Value
+        _G.AutoCollectOrbsLootbags = Value
     end
 })
 
-local AutoFarmToggle = AutoFarmSection:Toggle({
-    Name = "Auto Collect Orbs",
-	Tooltip = "Automatically collects event bubbles on the map",
-    Flag = "AutoCollectOrbs",
-    Default = false,
-    Callback = function(Value)
-        _G.AutoCollectOrbs = Value
-    end
-})
 
 local ThingsEventSection = EventPage:Section({Name = "Things", Side = 2, icon = "https://i.postimg.cc/cH8VsKQf/Bez-imeni-1.png"})
 
