@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------3112
+--------------------------------------------------------------------------------554
 -- КОНФИГ
 --------------------------------------------------------------------------------
 local CONFIG = {
@@ -477,27 +477,70 @@ local EggTools = {}
 
 function EggTools.Refresh() scanEggs() end
 
+-- Можно ли тебе открыть яйцо (те же условия, что в AutoIndex): мир, область, телепорт,
+-- требования по предыдущему яйцу и гейты. Скрытые/недоступные яйца не попадают в список.
+local function eggOpenable(name, save, depth)
+	depth = depth or 0
+	if depth > 6 then return false end
+	local L = Lib
+	local dir = L and L.Directory
+	local e = dir and dir.Eggs and dir.Eggs[name]
+	if not e then return false end
+	local hc = L.Shared and L.Shared.IsHardcore
+
+	if depth == 0 then
+		local a = e.area and dir.Areas and dir.Areas[e.area]
+		if not a or a.hidden then return false end
+		if L.RebornLock and L.RebornLock.AreaOpen and not L.RebornLock.AreaOpen(e.area) then return false end
+		if not L.WorldCmds.HasAccess(a.world) then return false end
+		if not L.WorldCmds.HasArea(e.area) then return false end
+		if L.WorldCmds.HasTeleport and not L.WorldCmds.HasTeleport(e.area) then return false end
+	end
+	if e.areaRequired and not L.WorldCmds.HasArea(e.area) then return false end
+
+	local req = e.eggRequired or ""
+	if req ~= "" and req ~= name and not eggOpenable(req, save, depth + 1) then return false end
+	if save and (e.eggRequiredOpenAmount or 0) > 0 and req ~= "" then
+		local src = hc and save.Hardcore or save
+		local opened = src and src.EggsOpened and src.EggsOpened[req]
+		if not opened or opened < e.eggRequiredOpenAmount then return false end
+	end
+	if save then
+		local src = hc and save.Hardcore or save
+		if name == "Dominus Egg" and not (src and src.OwnsDominusGate) then return false end
+		if (name == "Hacker Egg" or name == "Hacker Golden Egg") and not (src and src.OwnsHackerGate) then return false end
+	end
+	return true
+end
+
 -- Все яйца игры (включая другие миры): { name, area, world, here }
 -- here = яйцо в текущем мире. Список для UI-выбора яйца.
 function EggTools.GetAllEggs()
 	local L = getLib()
 	local dir = L and L.Directory
 	local out = {}
-	if not (dir and dir.Eggs) then return out end
+	if not (dir and dir.Eggs and dir.Areas and L.WorldCmds) then return out end
 	local cw = curWorld()
+	local okSave, save = pcall(function() return L.Save.Get() end)
+	if not okSave then save = nil end
 	for name in pairs(dir.Eggs) do
 		local info = eggInfo(name)
 		if info then
-			local okAccess, access = pcall(L.WorldCmds.HasAccess, info.world)
-			local okArea, hasArea = pcall(L.WorldCmds.HasArea, info.area)
-			if okAccess and access and okArea and hasArea then
-				out[#out + 1] = { name = name, area = info.area, world = info.world, here = (info.world == cw) }
+			local ok, can = pcall(eggOpenable, name, save)
+			if ok and can then
+				local w = dir.Worlds and dir.Worlds[info.world]
+				out[#out + 1] = {
+					name = name, area = info.area, world = info.world,
+					order = (w and w.worldOrder) or math.huge,
+					here = (info.world == cw),
+				}
 			end
 		end
 	end
-	table.sort(out, function(a, b)
-		if a.world ~= b.world then return tostring(a.world) < tostring(b.world) end
-		return a.name < b.name
+	table.sort(out, function(x, y)
+		if x.order ~= y.order then return x.order < y.order end
+		if x.world ~= y.world then return tostring(x.world) < tostring(y.world) end
+		return x.name < y.name
 	end)
 	return out
 end
@@ -508,8 +551,15 @@ function EggTools.GetEggInfo(eggId) return eggInfo(eggId) end
 -- Телепорт к яйцу (с переходом в другой мир при необходимости)
 function EggTools.GoToEgg(eggId) return goToEgg(eggId) end
 
+-- Для dropdown: ВСЕ яйца игры, которые ты можешь открыть (из всех миров).
+-- Если библиотека ещё не загрузилась — временно отдаём яйца, найденные на карте.
 function EggTools.GetEggNames()
 	local names = {}
+	local all = EggTools.GetAllEggs()
+	if #all > 0 then
+		for _, e in ipairs(all) do names[#names + 1] = e.name end
+		return names
+	end
 	for id, list in pairs(eggCache) do
 		for _, inst in ipairs(list) do
 			if inst.Parent and inst:GetAttribute("Unlocked") ~= false then
