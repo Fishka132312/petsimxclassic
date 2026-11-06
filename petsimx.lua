@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----533
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----33
 local CheatName = "Evade"
 
 local Players = game:GetService("Players")
@@ -297,9 +297,23 @@ local EggsPage = Window:Page({
 local selectedEgg = nil
 local selectedAmount = 1
 
+-- Все яйца игры, доступные игроку (из всех миров), берём из Directory
 local function getEggItems()
 	local tools = _G.EggTools
-	return tools and tools.GetEggNames() or {}
+	if not tools then return {} end
+	local names = {}
+	if tools.GetAllEggs then
+		local ok, list = pcall(tools.GetAllEggs)
+		if ok and type(list) == "table" then
+			for _, e in ipairs(list) do names[#names + 1] = e.name end
+		end
+	end
+	-- запасной вариант: только яйца текущей карты
+	if #names == 0 then
+		local ok, list = pcall(tools.GetEggNames)
+		if ok and type(list) == "table" then names = list end
+	end
+	return names
 end
 
 -- Ждём, пока скрипт отсканирует яйца на карте
@@ -366,7 +380,7 @@ EggSection:Slider({
 
 EggSection:Toggle({
 	Name = "Teleport to egg",
-	Tooltip = "Teleports to the egg (switches world if the egg is in another one). Required for eggs from other worlds",
+	Tooltip = "Teleports to the egg if you are too far away",
 	Flag = "EggTeleport",
 	Default = false,
 	Callback = function(Value)
@@ -455,7 +469,7 @@ EggSection:Button({
 
 EggSection:Button({
 	Name = "Refresh egg list",
-	Tooltip = "Refreshes the list of all eggs you can open",
+	Tooltip = "Reloads the list of all available eggs",
 	Callback = function()
 		local tools = _G.EggTools
 		if not tools then return end
