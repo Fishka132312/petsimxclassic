@@ -625,9 +625,9 @@ end)
 
 local IndexSection = AutoPage:Section({ Name = "Index", Side = 2 })
 
-IndexSection:Paragraph({
-	Name = "Pet Index",
-	Text = "Hatches and crafts pets to fill your collection index."
+local IndexInfo = IndexSection:Paragraph({
+	Name = "Status",
+	Text = "Waiting for AutoIndex.lua..."
 })
 
 IndexSection:Divider()
@@ -641,6 +641,65 @@ local AutoIndexToggle = IndexSection:Toggle({
 		_G.AutoIndexFarm  = Value
 	end
 })
+
+-- Статус Auto Index: какие Remote нужно выучить (learn) + что скрипт делает сейчас.
+-- Данные берём из состояния AutoIndex.lua (getgenv().__IndexFarm2)
+local function remoteLearned(r)
+	return typeof(r) == "Instance" and r.Parent ~= nil
+end
+
+task.spawn(function()
+	local genv = (getgenv and getgenv()) or _G
+	local lastOn = _G.AutoIndexFarm and true or false
+
+	while true do
+		task.wait(1)
+
+		local s = genv.__IndexFarm2
+		local lines = {}
+
+		if not s then
+			lines[1] = "AutoIndex.lua not loaded. Check console (F9)"
+		else
+			lines[#lines + 1] = "Now: " .. tostring(s.status or "Idle")
+
+			if type(s.indexProgress) == "function" then
+				local ok, cur, total = pcall(s.indexProgress)
+				if ok and cur and total then
+					lines[#lines + 1] = "Index: " .. cur .. "/" .. total .. " pets"
+				end
+			end
+
+			local needs = s.needs or {}
+			local function row(label, learned, hint)
+				lines[#lines + 1] = label .. ": " .. (learned and "learned" or ("NOT learned - " .. hint))
+			end
+
+			row("Eggs", remoteLearned(s.eggRemote), "open any egg manually once")
+			if needs.delete then
+				row("Delete", remoteLearned(s.deleteRemote), "delete one pet manually")
+			end
+			if needs.golden then
+				row("Golden", remoteLearned(s.goldRemote), "do one Golden craft manually")
+			end
+			if needs.rainbow then
+				row("Rainbow", remoteLearned(s.rainbowRemote), "do one Rainbow craft manually")
+			end
+			if needs.coin then
+				row("Coins", remoteLearned(s.coinRF) and remoteLearned(s.coinRE), "click any coin once")
+			end
+		end
+
+		pcall(function() IndexInfo:SetText(table.concat(lines, "\n")) end)
+
+		-- если фарм остановился сам (клавиша X, движение, конец целей) - выключаем тоггл
+		local on = _G.AutoIndexFarm and true or false
+		if on ~= lastOn then
+			lastOn = on
+			pcall(function() AutoIndexToggle:Set(on) end)
+		end
+	end
+end)
 
 -------------------------Misc-----------------------
 
