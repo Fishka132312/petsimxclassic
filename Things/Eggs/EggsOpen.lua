@@ -48,39 +48,53 @@ end
 -- подставляя своё яйцо и количество.
 -- Данные лежат в env, поэтому переживают перезапуск скрипта.
 --------------------------------------------------------------------------------
-local Captured = env.__EggCaptured
+local Captured = env.__EggCapturedV2
 if not Captured then
 	Captured = { remote = nil, method = nil, args = nil }
-	env.__EggCaptured = Captured
+	env.__EggCapturedV2 = Captured
 end
+
+-- глушим хук старой версии скрипта (он вызывал эту функцию)
+env.__EggIsEgg = nil
 
 local Lib, Net
 local eggCache = {} -- [eggId] = { inst, ... }
 
--- проверка "это название яйца?" (хук читает актуальную версию через env)
-env.__EggIsEgg = function(name)
-	if type(name) ~= "string" then return false end
-	if eggCache[name] then return true end
+-- Простая таблица-набор названий яиц. Хук только ЧИТАЕТ её и не вызывает
+-- никаких функций, чтобы не ломать игровые скрипты.
+local EggNames = {}
+env.__EggNamesV2 = EggNames
+
+local function rebuildNames()
+	local set = {}
+	for id in pairs(eggCache) do set[id] = true end
 	local d = Lib and Lib.Directory and Lib.Directory.Eggs
-	return d ~= nil and d[name] ~= nil
+	if type(d) == "table" then
+		for k in pairs(d) do
+			if type(k) == "string" then set[k] = true end
+		end
+	end
+	for k in pairs(EggNames) do EggNames[k] = nil end
+	for k in pairs(set) do EggNames[k] = true end
 end
 
-if not env.__EggHookInstalled then
-	if hookmetamethod and getnamecallmethod and newcclosure then
-		env.__EggHookInstalled = true
+if not env.__EggHookV2 then
+	if hookmetamethod and getnamecallmethod and newcclosure and checkcaller then
+		env.__EggHookV2 = true
 		local oldNamecall
 		oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
 			local method = getnamecallmethod()
-			if (method == "InvokeServer" or method == "FireServer")
-				and not (checkcaller and checkcaller()) then
-				local first = ...
-				local check = env.__EggIsEgg
-				if check and check(first) then
-					local c = env.__EggCaptured
-					if c then
-						c.remote = self
-						c.method = method
-						c.args = table.pack(...)
+			if method == "InvokeServer" or method == "FireServer" then
+				if not checkcaller() then
+					local first = ...
+					local names = env.__EggNamesV2
+					if type(first) == "string" and names and names[first] then
+						local c = env.__EggCapturedV2
+						if c then
+							c.remote = self
+							c.method = method
+							c.args = table.pack(...)
+						end
 					end
 				end
 			end
@@ -92,8 +106,19 @@ if not env.__EggHookInstalled then
 end
 
 --------------------------------------------------------------------------------
--- 1. ИГРОВОЙ Network.Invoke (запасной вариант, если ремоут ещё не пойман)
+-- 1. БИБЛИОТЕКА ИГРЫ И Network.Invoke (запасной вариант)
 --------------------------------------------------------------------------------
+local function getLib()
+	if Lib then return Lib end
+	local fw = ReplicatedStorage:FindFirstChild("Framework")
+	local m = fw and fw:FindFirstChild("Library")
+	if m and m:IsA("ModuleScript") then
+		local ok, res = pcall(require, m)
+		if ok and type(res) == "table" then Lib = res end
+	end
+	return Lib
+end
+
 local function pickNetwork(m)
 	if type(m) ~= "table" then return nil end
 	if type(m.Invoke) == "function" then return m end
@@ -102,34 +127,20 @@ local function pickNetwork(m)
 	return nil
 end
 
+-- вызывается только если ремоут не пойман, при старте ничего не require-им
 local function resolveNetwork()
 	if Net then return Net end
-	local list = {}
-	local function add(x) if x then list[#list + 1] = x end end
+	Net = pickNetwork(getLib())
+	if Net then return Net end
 
-	local fw = ReplicatedStorage:FindFirstChild("Framework")
-	add(fw and fw:FindFirstChild("Library"))
 	local lib = ReplicatedStorage:FindFirstChild("Library")
-	add(lib)
 	local client = lib and lib:FindFirstChild("Client")
-	add(client and client:FindFirstChild("Network"))
-
-	for _, mod in ipairs(list) do
-		if mod:IsA("ModuleScript") then
-			local ok, res = pcall(require, mod)
-			if ok then
-				if not Lib and type(res) == "table" and type(res.Variables) == "table" then
-					Lib = res
-				end
-				local net = pickNetwork(res)
-				if net then
-					Net = net
-					return Net
-				end
-			end
-		end
+	local mod = client and client:FindFirstChild("Network")
+	if mod and mod:IsA("ModuleScript") then
+		local ok, res = pcall(require, mod)
+		if ok then Net = pickNetwork(res) end
 	end
-	return nil
+	return Net
 end
 
 local function isOpening()
@@ -347,12 +358,16 @@ _G.EggTools = EggTools
 
 task.spawn(function()
 	while _G.EggToolsGen == myGen do
-		local ok, err = pcall(scanEggs)
+		local ok, err = pcall(function()
+			scanEggs()
+			getLib()
+			rebuildNames()
+		end)
 		if not ok then warn("[Eggs] Ошибка сканирования: " .. tostring(err)) end
 		task.wait(CONFIG.RescanInterval)
 	end
 end)
 
-task.spawn(resolveNetwork)
+task.spawn(getLib)
 
 print("[Eggs] Готово. Открой яйцо вручную ОДИН раз (скрипт поймает ремоут), затем _G.EggTools.AutoOpen.Start('Cracked Egg', 3) / .Stop()")
