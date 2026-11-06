@@ -15,7 +15,7 @@ local scripts = {
   'AutoFarm/AutoFarm.lua',
   'AutoFarm/FarmStats.lua',
   'Eggs/EggsOpen.lua',
-  'JustAutoOpen.lua',
+  'Eggs/JustAutoOpen.lua',
   'Auto/AutoGolden.lua',
   'Auto/AutoRainbow.lua',
   'Auto/AutoIndex.lua',
@@ -24,7 +24,7 @@ local scripts = {
   'Misc/AntiLag3.lua',
   'Misc/AntiLag4.lua',
   'Custom/Teams.lua',
-  'Custom/PetChanger.lua
+  'Custom/PetChanger.lua',
 }
 
 local baseUrl = 'https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/'
@@ -605,7 +605,7 @@ local AutoRainbowToggle = CraftSection:Toggle({
 	Flag = "PetsChanger",
 	Default = false,
 	Callback = function(Value)
-		_G.PetChanger  = Value
+		_G.PetsChanger = Value
 	end
 })
 
