@@ -24,6 +24,7 @@ local scripts = {
   'Misc/AntiLag3.lua',
   'Misc/AntiLag4.lua',
   'Custom/Teams.lua',
+  'Custom/PetChanger.lua
 }
 
 local baseUrl = 'https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/'
@@ -598,6 +599,23 @@ local AutoRainbowToggle = CraftSection:Toggle({
 	end
 })
 
+local AutoRainbowToggle = CraftSection:Toggle({
+	Name = "Pets Changer",
+	Tooltip = "You can change youre pets to any and open eggs/gifts",
+	Flag = "PetsChanger",
+	Default = false,
+	Callback = function(Value)
+		_G.PetChanger  = Value
+	end
+})
+
+CraftSection:Button({
+    Name = "Unlock Hoverboards",
+    Callback = function()
+        loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Custom/UnlockAllHoverboard.lua'))()
+    end
+})
+
 
 -------------------------Misc-----------------------
 
@@ -665,6 +683,13 @@ local Disable3dRenderToggle = MiscSection:Toggle({
     Callback = function(Value)
        local RunService = game:GetService("RunService")
         RunService:Set3dRenderingEnabled(not Value)
+    end
+})
+
+CraftSection:Button({
+    Name = "Rejoin",
+    Callback = function()
+        loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Misc/Rejoin.lua'))()
     end
 })
 
