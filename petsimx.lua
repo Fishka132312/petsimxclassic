@@ -106,10 +106,11 @@ local function normalize(Value)
 end
 
 -- Обновление списка в дропдауне (подбираем метод, который есть у библиотеки)
-local function pushItems(dropdown, items)
+local function pushItems(dropdown, items, keep)
+	if keep and not table.find(items, keep) then keep = nil end
 	for _, method in ipairs({ "Refresh", "SetItems", "SetOptions", "SetValues" }) do
 		if type(dropdown[method]) == "function" then
-			if pcall(dropdown[method], dropdown, items) then
+			if pcall(dropdown[method], dropdown, items, keep) then
 				dprint("список обновлён методом", method)
 				return true
 			end
@@ -297,33 +298,62 @@ local EggsPage = Window:Page({
 local selectedEgg = nil
 local selectedAmount = 1
 
--- Все яйца игры, доступные игроку (из всех миров), берём из Directory
+-- Список яиц лежит в кэше. Собирается в ФОНЕ (task.spawn), чтобы загрузка GUI
+-- никогда не зависала, даже если игровые функции проверки доступа медленные.
+local eggItems = {}
+local eggUpdating = false
+
 local function getEggItems()
-	local tools = _G.EggTools
-	if not tools then return {} end
-	local names = {}
-	if tools.GetAllEggs then
-		local ok, list = pcall(tools.GetAllEggs)
-		if ok and type(list) == "table" then
-			for _, e in ipairs(list) do names[#names + 1] = e.name end
-		end
-	end
-	-- запасной вариант: только яйца текущей карты
-	if #names == 0 then
-		local ok, list = pcall(tools.GetEggNames)
-		if ok and type(list) == "table" then names = list end
-	end
-	return names
+	return eggItems
 end
 
--- Ждём, пока скрипт отсканирует яйца на карте
-do
-	local waited = 0
-	while #getEggItems() == 0 and waited < 10 do
-		task.wait(0.5)
-		waited += 0.5
-	end
-	dprint("яиц на старте:", #getEggItems())
+local function rebuildEggItems(callback)
+	local tools = _G.EggTools
+	if not tools or eggUpdating then return end
+	eggUpdating = true
+	local finished = false
+
+	task.spawn(function()
+		local names, seen = {}, {}
+		local function add(n)
+			if type(n) == "string" and not seen[n] then
+				seen[n] = true
+				names[#names + 1] = n
+			end
+		end
+
+		-- все яйца игры из всех миров (доступные игроку)
+		if tools.GetAllEggs then
+			local ok, list = pcall(tools.GetAllEggs)
+			if ok and type(list) == "table" then
+				for _, e in ipairs(list) do add(type(e) == "table" and e.name or e) end
+			else
+				dprint("GetAllEggs ошибка:", tostring(list))
+			end
+		end
+
+		-- плюс яйца текущей карты (на случай если Directory недоступен)
+		local extra = {}
+		local ok2, list2 = pcall(tools.GetEggNames)
+		if ok2 and type(list2) == "table" then
+			for _, n in ipairs(list2) do
+				if not seen[n] then extra[#extra + 1] = n end
+			end
+			table.sort(extra)
+			for _, n in ipairs(extra) do add(n) end
+		end
+
+		eggItems = names
+		finished = true
+		eggUpdating = false
+		dprint("яиц в списке:", #names)
+		if callback then pcall(callback, names) end
+	end)
+
+	-- страховка: если сбор завис, не блокируем следующие попытки
+	task.delay(20, function()
+		if not finished then eggUpdating = false end
+	end)
 end
 
 local EggSection = EggsPage:Section({ Name = "Egg Opener", Side = 1, Icon = "https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Icons/eggs.png" })
@@ -339,7 +369,7 @@ local EggDropdown = EggSection:Dropdown({
 	Name = "Egg",
 	Tooltip = "Choose the egg to open",
 	Flag = "EggSelected",
-	Items = getEggItems(),
+	Items = {},
 	Multi = false,
 	Callback = function(Value)
 		selectedEgg = normalize(Value)[1]
@@ -469,22 +499,35 @@ EggSection:Button({
 
 EggSection:Button({
 	Name = "Refresh egg list",
-	Tooltip = "Reloads the list of all available eggs",
+	Tooltip = "Rescans eggs on the map",
 	Callback = function()
 		local tools = _G.EggTools
 		if not tools then return end
 		task.spawn(function()
-			tools.Refresh()
-			local items = getEggItems()
-			pushItems(EggDropdown, items)
-			Library:Notification({
-				Title = "Eggs",
-				Description = "Found eggs: " .. #items,
-				Duration = 3
-			})
+			pcall(tools.Refresh)
+			eggUpdating = false
+			rebuildEggItems(function(items)
+				pushItems(EggDropdown, items, selectedEgg)
+				Library:Notification({
+					Title = "Eggs",
+					Description = "Found eggs: " .. #items,
+					Duration = 3
+				})
+			end)
 		end)
 	end
 })
+
+-- Первичное наполнение списка: пробуем несколько раз, пока игровая библиотека не загрузится
+task.spawn(function()
+	for _ = 1, 15 do
+		rebuildEggItems(function(items)
+			if #items > 0 then pushItems(EggDropdown, items, selectedEgg) end
+		end)
+		task.wait(2)
+		if #eggItems > 0 then break end
+	end
+end)
 
 -- Статус и автообновление списка яиц
 task.spawn(function()
@@ -510,12 +553,13 @@ task.spawn(function()
 			end
 
 			if ticks % 5 == 0 then
-				local items = getEggItems()
-				local sig = table.concat(items, "|")
-				if sig ~= last and #items > 0 then
-					last = sig
-					pushItems(EggDropdown, items)
-				end
+				rebuildEggItems(function(items)
+					local sig = table.concat(items, "|")
+					if sig ~= last and #items > 0 then
+						last = sig
+						pushItems(EggDropdown, items, selectedEgg)
+					end
+				end)
 			end
 		end
 	end
