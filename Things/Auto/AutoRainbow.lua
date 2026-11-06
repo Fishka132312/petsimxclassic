@@ -10,11 +10,12 @@ local KEY, HOOK_KEY = "__AutoRainbow", "__AutoRainbowHook"
 
 -- ===== НАСТРОЙКИ =====
 local PETS_PER_CRAFT = 6     -- сколько golden петов в одном крафте
-local DELAY          = 0.1   -- пауза между крафтами (сек)
+local DELAY          = 0.5   -- пауза между крафтами (сек)
 local RANDOM_GROUP   = true  -- true = случайная группа, false = по алфавиту
 local SKIP_RARITIES  = {}    -- например { "Secret", "Mythical" } — этих не трогать
 local STOP_KEY       = Enum.KeyCode.X   -- выключить
 local TOGGLE_KEY     = Enum.KeyCode.Z   -- включить/выключить переменную
+local HOTKEYS        = false  -- false = клавиши Z/X отключены (управление только из GUI)
 -- ======================
 
 -- Выключаем прошлую копию: она перестаёт работать (цикл и подписки убираются),
@@ -192,7 +193,7 @@ state.thread = task.spawn(function()
 		if on and not wasOn then
 			used, badGroups = {}, {}
 			crafts, fails = 0, 0
-			warn("[AutoRainbow] Включено. Выключить: _G.AutoRainbowCraft = false или " .. STOP_KEY.Name)
+			warn("[AutoRainbow] Включено. Выключить: _G.AutoRainbowCraft = false" .. (HOTKEYS and (" или " .. STOP_KEY.Name) or ""))
 		elseif wasOn and not on then
 			warn("[AutoRainbow] Выключено. Крафтов за запуск: " .. crafts)
 		end
@@ -256,17 +257,17 @@ if not env[HOOK_KEY] then
 	end))
 end
 
-table.insert(state.connections, UIS.InputBegan:Connect(function(input, processed)
+if HOTKEYS then table.insert(state.connections, UIS.InputBegan:Connect(function(input, processed)
 	if processed then return end
 	if input.KeyCode == STOP_KEY then
 		_G.AutoRainbowCraft = false
 	elseif input.KeyCode == TOGGLE_KEY then
 		_G.AutoRainbowCraft = not _G.AutoRainbowCraft
 	end
-end))
+end)) end
 
 if state.remote then
-	warn("[AutoRainbow] Remote уже известен. Включи: _G.AutoRainbowCraft = true (или клавиша " .. TOGGLE_KEY.Name .. ")")
+	warn("[AutoRainbow] Remote уже известен. Включи: _G.AutoRainbowCraft = true" .. (HOTKEYS and (" (или клавиша " .. TOGGLE_KEY.Name .. ")") or ""))
 else
 	warn("[AutoRainbow] Готов. Сделай ОДИН крафт вручную (ОК + подтверждение), затем _G.AutoRainbowCraft = true")
 end
