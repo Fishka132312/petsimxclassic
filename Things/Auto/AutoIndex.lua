@@ -139,7 +139,35 @@ local state = {
 }
 env[KEY] = state
 
+-- ===== статус для GUI (da1.lua читает env.__IndexFarm2: status, needs, indexProgress, Remote-ы) =====
+local function setStatus(text, isPrompt)
+	state.status = text
+	state.promptActive = isPrompt and true or false
+end
+
+-- снять "ACTION NEEDED" после того, как ожидание ручного действия закончилось
+local function clearPrompt(text)
+	if state.promptActive then setStatus(text or "Continuing...") end
+end
+
+local VARIANT_EN = { "normal", "golden", "rainbow" }
+
+do
+	local function hasVar(v)
+		for _, x in ipairs(VARIANTS) do if x == v then return true end end
+		return false
+	end
+	-- какие Remote-ы вообще нужны при текущих настройках (GUI показывает только их)
+	state.needs = {
+		delete  = (DELETE_JUNK and not DRY_RUN) and true or false,
+		golden  = (hasVar(2) or hasVar(3)) and true or false,
+		rainbow = hasVar(3),
+		coin    = CURRENCY_FARM.ENABLED and true or false,
+	}
+end
+
 if Library.Shared.IsTradingPlaza then
+	setStatus("Trading Plaza: teleports are disabled, join a normal world")
 	return warn("[IndexFarm] В Trading Plaza телепорты отключены. Зайди в обычный мир.")
 end
 
@@ -169,6 +197,15 @@ end
 
 local function stop(reason)
 	if state.running then warn("[IndexFarm] Стоп: " .. reason) end
+	do
+		local r = tostring(reason)
+		local en = r
+		if r:find("движение", 1, true) then en = "you moved the character"
+		elseif r:find("клавиша", 1, true) then en = "stop key pressed"
+		elseif r:find("не пойман", 1, true) then en = "required remote was not learned"
+		end
+		setStatus("Stopped: " .. en)
+	end
 	state.running = false
 	_G.AutoIndexFarm = false -- иначе управляющий поток сразу включил бы фарм снова
 end
@@ -516,6 +553,7 @@ local function goToMachine(kind)
 		return true
 	end
 	if (machineFail[kind] or 0) > os.clock() then return false, "машина недоступна (повторю позже)" end
+	setStatus("Going to the " .. (kind == "golden" and "Golden" or "Rainbow") .. " Machine")
 
 	local function fail(msg)
 		machineFail[kind] = os.clock() + MACHINE_FAIL_COOLDOWN
@@ -789,6 +827,8 @@ local function craft(petId, what)
 	warn(string.format("[IndexFarm] %s-крафт: %s x%d | шанс %s%% | цена %s",
 		c.label, dirPet and dirPet.name or petId, #chosen,
 		tostring(row and row.chance), tostring(row and row.cost)))
+
+	setStatus(string.format("Crafting %s: %s x%d", c.label, dirPet and dirPet.name or petId, #chosen))
 
 	-- снимок инвентаря до крафта: петы, которые появятся после него, считаем нашими (для авто-удаления)
 	if not craftSnap then
@@ -1233,6 +1273,7 @@ end
 -- ===== телепорт к яйцу =====
 local function goTo(t)
 	state.atMachine = nil
+	setStatus("Teleporting to " .. tostring(t.area) .. " (egg: " .. tostring(t.egg) .. ")")
 	-- уже стоим в этой области (соседнее яйцо) - заново в область не телепортируемся, просто подходим к яйцу
 	local sameSpot = state.lastArea == t.area and Library.WorldCmds.GetMap() ~= nil and player.Character ~= nil
 	if not sameSpot then
@@ -1364,8 +1405,10 @@ local function farm(t)
 			end
 			warn("[IndexFarm] Хватает петов для " .. info.label .. "-крафта, но Remote не пойман. " ..
 				"Сделай ОДИН " .. info.label .. "-крафт вручную (ОК + подтверждение), скрипт продолжит сам.")
+			setStatus("ACTION NEEDED: do ONE " .. info.label .. " craft manually (OK + confirm)", true)
 			local w0 = os.clock()
 			while state.running and not remoteOk(state[info.remote]) and os.clock() - w0 < 180 do task.wait(0.5) end
+			clearPrompt("Craft remote learned, continuing...")
 			if not remoteOk(state[info.remote]) then stop("Remote " .. info.label .. " не пойман") return "stopped" end
 			continue
 		end
@@ -1419,6 +1462,7 @@ local function farm(t)
 		if success then
 			opens += mode
 			fails = 0
+			setStatus(string.format("Hatching %s (%s) | %s | opened %d", t.name, VARIANT_EN[t.variant] or "?", t.egg, opens))
 		else
 			fails += 1
 			warn("[IndexFarm] Отказ:", tostring(res[1]), tostring(res[2]), tostring(res[3]))
@@ -1428,8 +1472,10 @@ local function farm(t)
 					return "failed"
 				end
 				warn("[IndexFarm] Не получилось открыть напрямую. Открой любое яйцо вручную ОДИН раз - скрипт подхватит Remote и продолжит.")
+				setStatus("ACTION NEEDED: open any egg manually ONCE", true)
 				local w0 = os.clock()
 				while state.running and not state.eggRemote and os.clock() - w0 < 120 do task.wait(0.5) end
+				clearPrompt("Egg remote learned, continuing...")
 				if not state.eggRemote then stop("Remote яиц не пойман") return "stopped" end
 				fails = 0
 			end
@@ -1445,7 +1491,9 @@ local CF -- модуль фарма валюты объявлен ниже, пе
 local function waitFor(getter, seconds)
 	local t0 = os.clock()
 	while state.running and not getter() and os.clock() - t0 < seconds do task.wait(0.5) end
-	return getter() and true or false
+	local ok = getter() and true or false
+	clearPrompt(ok and "Remote learned, continuing..." or "Not learned (timeout), continuing...")
+	return ok
 end
 
 local function worldOrderOf(areaName)
@@ -1659,10 +1707,12 @@ end
 local function prompt(ru, en)
 	warn("[IndexFarm] >>> " .. ru .. " <<<")
 	notify(en or ru, 12)
+	setStatus("ACTION NEEDED: " .. (en or ru), true)
 end
 
-local function header(n, total, text)
+local function header(n, total, text, en)
 	warn(string.format("[IndexFarm] ===== Шаг %d/%d: %s =====", n, total, text))
+	setStatus(string.format("Setup %d/%d: %s", n, total, en or text))
 end
 
 local function petName(pet)
@@ -1748,9 +1798,10 @@ local function openForPet(e, accept, limit)
 				local w0 = os.clock()
 				while state.running and os.clock() - w0 < BOOTSTRAP_WAIT do
 					pet = newPetSince(snap, accept)
-					if pet then return pet end
+					if pet then clearPrompt("Egg opened, continuing...") return pet end
 					task.wait(0.3)
 				end
+				clearPrompt("Timed out, continuing...")
 				return nil
 			end
 			task.wait(0.4)
@@ -1799,14 +1850,14 @@ local function bootstrapGuided()
 	-- Шаг: Remote-ы монет (кликаешь по монете сам, заодно тест фарма)
 	if needCoin and state.running then
 		n += 1
-		header(n, total, "Remote-ы монет (тест фарма)")
+		header(n, total, "Remote-ы монет (тест фарма)", "Learning coin remotes")
 		CF.learnCoins(e1 and e1.currency or nil)
 	end
 
 	-- Шаг: Remote яиц (открываешь яйцо сам)
 	if needEgg and e1 and state.running then
 		n += 1
-		header(n, total, "Remote яиц (getchildren)")
+		header(n, total, "Remote яиц (getchildren)", "Learning egg remote")
 		standAt(e1)
 		local snap = snapshotPets()
 		prompt("ОТКРОЙ ЯЙЦО «" .. e1.egg .. "» ВРУЧНУЮ 1 РАЗ - скрипт запомнит Remote",
@@ -1828,7 +1879,7 @@ local function bootstrapGuided()
 	-- Шаг: скрипт сам открывает яйцо - этого пета ты потом удалишь
 	if needDelete and e1 and state.running then
 		n += 1
-		header(n, total, "Пет на удаление")
+		header(n, total, "Пет на удаление", "Getting a pet to delete")
 		if standAt(e1) then
 			local manualUid = setup.manualPet and setup.manualPet.uid
 			local pet = openForPet(e1, function(p) return isNormal(p) and p.uid ~= manualUid end, 25)
@@ -1844,7 +1895,7 @@ local function bootstrapGuided()
 	-- Шаг: golden-версия яйца -> golden пет для Rainbow-крафта
 	if needRainbow and state.running then
 		n += 1
-		header(n, total, "Golden пет для Rainbow")
+		header(n, total, "Golden пет для Rainbow", "Getting a golden pet for Rainbow")
 		local eg = goldenCounterpart(e1)
 		if not eg then
 			warn("[IndexFarm] Нет доступного golden-яйца (не хватает валюты/доступа): golden пета для Rainbow возьмёшь сам.")
@@ -1866,7 +1917,7 @@ local function bootstrapGuided()
 	-- Шаг: Remote удаления
 	if needDelete and state.running then
 		n += 1
-		header(n, total, "Remote удаления")
+		header(n, total, "Remote удаления", "Learning delete remote")
 		local target = setup.deletePet and petByUid(setup.deletePet.uid)
 		if target then
 			prompt("УДАЛИ ПЕТА «" .. petName(target) .. "» (инвентарь -> корзина -> выбери его -> Delete -> подтверди)",
@@ -1885,7 +1936,7 @@ local function bootstrapGuided()
 	-- Шаг: Golden Machine (обычный -> golden)
 	if needGold and state.running then
 		n += 1
-		header(n, total, "Golden Machine")
+		header(n, total, "Golden Machine", "Learning Golden Machine")
 		if not haveCraftable("normal") and e1 and standAt(e1) then
 			openForPet(e1, isNormal, 20)
 		end
@@ -1905,7 +1956,7 @@ local function bootstrapGuided()
 	-- Шаг: Rainbow Machine (golden -> rainbow)
 	if needRainbow and state.running then
 		n += 1
-		header(n, total, "Rainbow Machine")
+		header(n, total, "Rainbow Machine", "Learning Rainbow Machine")
 		if not haveCraftable("golden") and setup.goldEgg and standAt(setup.goldEgg) then
 			setup.goldPet = openForPet(setup.goldEgg, isGoldenPet, 80) or setup.goldPet
 		end
@@ -1928,6 +1979,7 @@ local function bootstrapGuided()
 
 	warn("[IndexFarm] Подготовка завершена. Дальше фарм индекса.")
 	notify("Setup complete, starting the index farm", 6)
+	setStatus("Setup complete, starting the farm")
 end
 
 -- ===== уведомления: пет добавился в индекс =====
@@ -1948,6 +2000,12 @@ local function indexCount(save)
 		if collectableAll[k] then n += 1 end
 	end
 	return n
+end
+
+-- сколько петов уже в индексе (для GUI)
+state.indexProgress = function()
+	local save = Library.Save.Get()
+	if save and save.Collection then return indexCount(save), indexTotal end
 end
 
 -- раз в секунду сравниваем коллекцию: новые записи = пет засчитан в индекс (выбит, скрафчен, получен вручную - неважно)
@@ -2371,10 +2429,12 @@ function CF.ensureRemotes()
 	while state.active and state.running and os.clock() - t0 < CURRENCY_FARM.LEARN_WAIT do
 		if CF.ready() then
 			warn("[IndexFarm] ФАРМ: Remote-ы монет пойманы, продолжаю.")
+			clearPrompt("Coin remotes learned, continuing...")
 			return true
 		end
 		task.wait(0.5)
 	end
+	clearPrompt("Coin remotes not learned (timeout), continuing...")
 	return CF.ready()
 end
 
@@ -2596,6 +2656,7 @@ function CF.run(t)
 
 			if now >= nextAssign then
 				nextAssign = now + cfg.ASSIGN_INTERVAL
+				setStatus(string.format("Farming %s in %s: %s / %s", cur, area, CF.fmt(have), CF.fmt(target)))
 				local ok, err = pcall(CF.distribute)
 				if not ok then warn("[IndexFarm] ФАРМ: ошибка назначения: " .. tostring(err)) end
 			end
@@ -2649,6 +2710,7 @@ local VARIANT_NAME = { "обычные", "golden", "rainbow" }
 
 local function main()
 	state.running = true
+	setStatus("Starting...")
 	warn("[IndexFarm] Старт. Остановка: _G.AutoIndexFarm = false или " .. STOP_KEY.Name .. (STOP_ON_MOVE and " или движение" or ""))
 	if CURRENCY_FARM.ENABLED and not BOOTSTRAP and not CF.ready() then
 		prompt("Для фарма валюты нужны Remote-ы монет: заранее кликни ВРУЧНУЮ по любой монете - скрипт их поймает; иначе попрошу, когда понадобятся",
@@ -2715,6 +2777,8 @@ local function main()
 			warn(string.format("[IndexFarm] Цель: %s (%s) из «%s»%s", t.name, VARIANT_NAME[t.variant], t.egg,
 				state.pinned and " [выбрана вручную: случайная]" or ""))
 
+			setStatus(string.format("Target: %s (%s) from %s", t.name, VARIANT_EN[t.variant] or "?", t.egg))
+
 			local proceed = true
 			if t.need > 0 then
 				if state.lastEgg ~= t.egg then
@@ -2772,7 +2836,10 @@ local function main()
 	-- если фарм дошёл до конца сам (никто не останавливал) - снимаем переменную
 	local natural = state.running
 	state.running = false
-	if natural then _G.AutoIndexFarm = false end
+	if natural then
+		_G.AutoIndexFarm = false
+		setStatus("Finished: no more targets")
+	end
 	warn("[IndexFarm] Готово.")
 end
 
@@ -2926,6 +2993,7 @@ state.thread = task.spawn(function()
 			end)
 		elseif not on and state.running then
 			state.running = false
+			setStatus("Stopped (switched off)")
 			warn("[IndexFarm] Выключено переменной, останавливаюсь...")
 		end
 
