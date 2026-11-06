@@ -10,10 +10,11 @@ local KEY, HOOK_KEY = "__AutoGolden", "__AutoGoldenHook"
 
 -- ===== НАСТРОЙКИ =====
 local PETS_PER_CRAFT = 6     -- минимум 5; больше = выше шанс, но дороже
-local DELAY          = 0.1   -- пауза между крафтами (сек)
+local DELAY          = 0.5   -- пауза между крафтами (сек)
 local SKIP_RARITIES  = {}    -- например { "Secret", "Mythical" } — этих не трогать
 local STOP_KEY       = Enum.KeyCode.X   -- выключить
 local TOGGLE_KEY     = Enum.KeyCode.Z   -- включить/выключить переменную
+local HOTKEYS        = false  -- false = клавиши Z/X отключены (управление только из GUI)
 -- ======================
 
 -- Выключаем прошлую копию: она перестаёт работать (цикл и подписки убираются),
@@ -179,7 +180,7 @@ state.thread = task.spawn(function()
 		if on and not wasOn then
 			used, badGroups = {}, {}
 			crafts, fails = 0, 0
-			warn("[AutoGolden] Включено. Выключить: _G.AutoGoldenCraft = false или " .. STOP_KEY.Name)
+			warn("[AutoGolden] Включено. Выключить: _G.AutoGoldenCraft = false" .. (HOTKEYS and (" или " .. STOP_KEY.Name) or ""))
 		elseif wasOn and not on then
 			warn("[AutoGolden] Выключено. Крафтов за запуск: " .. crafts)
 		end
@@ -235,17 +236,17 @@ if not env[HOOK_KEY] then
 	end))
 end
 
-table.insert(state.connections, UIS.InputBegan:Connect(function(input, processed)
+if HOTKEYS then table.insert(state.connections, UIS.InputBegan:Connect(function(input, processed)
 	if processed then return end
 	if input.KeyCode == STOP_KEY then
 		_G.AutoGoldenCraft = false
 	elseif input.KeyCode == TOGGLE_KEY then
 		_G.AutoGoldenCraft = not _G.AutoGoldenCraft
 	end
-end))
+end)) end
 
 if state.remote then
-	warn("[AutoGolden] Remote уже известен. Включи: _G.AutoGoldenCraft = true (или клавиша " .. TOGGLE_KEY.Name .. ")")
+	warn("[AutoGolden] Remote уже известен. Включи: _G.AutoGoldenCraft = true" .. (HOTKEYS and (" (или клавиша " .. TOGGLE_KEY.Name .. ")") or ""))
 else
 	warn("[AutoGolden] Готов. Сделай ОДИН крафт вручную (ОК + подтверждение), затем _G.AutoGoldenCraft = true")
 end
