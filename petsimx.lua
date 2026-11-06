@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----22
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----322
 local CheatName = "Evade"
 
 local Players = game:GetService("Players")
@@ -566,8 +566,12 @@ local AutoRainbowToggle = CraftSection:Toggle({
 
 -- Статус Remote + синхронизация тогглов с переменными
 -- (переменные могут меняться клавишами Z / X внутри скриптов крафта)
+-- Тоггл меняем ТОЛЬКО если переменную изменил сам скрипт, а не по сравнению с Library.Flags
 task.spawn(function()
 	local genv = (getgenv and getgenv()) or _G
+	local lastG = _G.AutoGoldenCraft and true or false
+	local lastR = _G.AutoRainbowCraft and true or false
+
 	while true do
 		task.wait(1)
 
@@ -578,18 +582,20 @@ task.spawn(function()
 		pcall(function() CraftInfo:SetText(text) end)
 
 		local g = _G.AutoGoldenCraft and true or false
-		if g ~= (Library.Flags["AutoGoldenCraft"] and true or false) then
+		if g ~= lastG then
+			lastG = g
 			pcall(function() AutoGoldenToggle:Set(g) end)
 		end
 
 		local r = _G.AutoRainbowCraft and true or false
-		if r ~= (Library.Flags["AutoRainbowCraft"] and true or false) then
+		if r ~= lastR then
+			lastR = r
 			pcall(function() AutoRainbowToggle:Set(r) end)
 		end
 	end
 end)
 
-local AutoRainbowToggle = CraftSection:Toggle({
+local AutoIndexToggle = CraftSection:Toggle({
 	Name = "Auto Index",
 	Tooltip = "Hatching, craftings pets for ur index",
 	Flag = "AutoIndex",
@@ -598,24 +604,6 @@ local AutoRainbowToggle = CraftSection:Toggle({
 		_G.AutoIndexFarm  = Value
 	end
 })
-
-local AutoRainbowToggle = CraftSection:Toggle({
-	Name = "Pets Changer",
-	Tooltip = "You can change youre pets to any and open eggs/gifts",
-	Flag = "PetsChanger",
-	Default = false,
-	Callback = function(Value)
-		_G.PetsChanger = Value
-	end
-})
-
-CraftSection:Button({
-    Name = "Unlock Hoverboards",
-    Callback = function()
-        loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Custom/UnlockAllHoverboard.lua'))()
-    end
-})
-
 
 -------------------------Misc-----------------------
 
@@ -768,14 +756,33 @@ local TeamsToggle = CustomSection:Toggle({
 -- Синхронизация: если переменную поменяли из консоли - тоггл тоже переключится
 task.spawn(function()
 	local genv = (getgenv and getgenv()) or _G
+	local last = genv.TeamsEnabled == true
 	while true do
 		task.wait(1)
 		local t = genv.TeamsEnabled == true
-		if t ~= (Library.Flags["TeamsEnabled"] and true or false) then
+		if t ~= last then
+			last = t
 			pcall(function() TeamsToggle:Set(t) end)
 		end
 	end
 end)
+
+local PetsChangerToggle = CraftSection:Toggle({
+	Name = "Pets Changer",
+	Tooltip = "You can change youre pets to any and open eggs/gifts",
+	Flag = "PetsChanger",
+	Default = false,
+	Callback = function(Value)
+		_G.PetsChanger = Value
+	end
+})
+
+CraftSection:Button({
+    Name = "Unlock Hoverboards",
+    Callback = function()
+        loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Custom/UnlockAllHoverboard.lua'))()
+    end
+})
 
 local SettingsCat = Window:Category("Settings")
 
