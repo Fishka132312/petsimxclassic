@@ -124,7 +124,7 @@ end
 local AutoFarmCat = Window:Category("Event")
 local EventPage = Window:Page({
 		Name = "Auto Farm",
-		Icon = "https://i.postimg.cc/6q7p8GSZ/Bez-imeni-2.png",
+		Icon = "https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Icons/autofarm.png",
 		Category = AutoFarmCat
 })
 
@@ -290,7 +290,7 @@ end
 local EggsCat = Window:Category("Eggs")
 local EggsPage = Window:Page({
 	Name = "Eggs",
-	Icon = "https://i.postimg.cc/6q7p8GSZ/Bez-imeni-2.png",
+	Icon = "https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Icons/eggs.png",
 	Category = EggsCat
 })
 
@@ -559,7 +559,7 @@ local NoAnimToggle = QuickSection:Toggle({
 local AutoCat = Window:Category("Auto")
 local AutoPage = Window:Page({
 	Name = "Auto",
-	Icon = "https://i.postimg.cc/cH8VsKQf/Bez-imeni-1.png",
+	Icon = "https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Icons/auto.png",
 	Category = AutoCat
 })
 
@@ -706,7 +706,7 @@ end)
 local GameCat = Window:Category("Game")
 local MiscPage = Window:Page({
 	Name = "Misc",
-	Icon = "https://i.postimg.cc/CxnfNm71/Bez-imeni-1.png",
+	Icon = "https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Icons/misc.png",
 	Category = GameCat
 })
 
@@ -844,7 +844,7 @@ UtilSection:Button({
 local CustomCat = Window:Category("Custom")
 local CustomPage = Window:Page({
 	Name = "Custom",
-	Icon = "https://i.postimg.cc/CxnfNm71/Bez-imeni-1.png",
+	Icon = "https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Icons/custom.png",
 	Category = CustomCat
 })
 
