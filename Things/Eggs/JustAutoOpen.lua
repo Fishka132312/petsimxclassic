@@ -9,7 +9,8 @@ local KEY = "__AutoEggLast"            -- новое состояние (ста�
 local HOOK_KEY = "__AutoEggLastHook"   -- новый хук
 
 local DELAY = 0.4          -- пауза между открытиями (сек), не ставь слишком низко
-local MAX_FAILS = 3        -- ошибок подряд -> переменная сбрасывается в false
+local MAX_FAILS = 3        -- ошибок вызова подряд -> переменная сбрасывается в false
+local MAX_REFUSALS = 10   -- отказов сервера подряд (нет денег и т.д.) -> сброс в false
 local STOP_KEY = Enum.KeyCode.X  -- клавиша экстренной остановки
 local STOP_ON_MOVE = false -- true = выключать при движении персонажа
 
@@ -65,12 +66,28 @@ end
 
 -- Главный цикл: работает всегда, но покупает только когда переменная = true
 state.thread = task.spawn(function()
-	local fails = 0
+	local fails, refusals = 0, 0
 	local warnedNoData = false
+	local wasOn = false
+	local seenArgs = nil
 
 	while state.active do
-		if not _G.AutoOpenLastEgg then
-			fails = 0
+		-- сообщаем, когда хук поймал вызов (после ручного открытия яйца)
+		if state.args ~= seenArgs then
+			seenArgs = state.args
+			warn("[AutoEgg] Запомнил вызов: яйцо '" .. tostring(state.args[1]) .. "', метод " .. tostring(state.method))
+		end
+
+		local on = _G.AutoOpenLastEgg and true or false
+		if on and not wasOn then
+			warn("[AutoEgg] Включено. " .. (state.args
+				and ("Повторяю: " .. tostring(state.args[1]))
+				or "Вызов ещё не пойман: открой яйцо вручную"))
+		end
+		wasOn = on
+
+		if not on then
+			fails, refusals = 0, 0
 			warnedNoData = false
 			task.wait(0.1)
 		else
@@ -90,16 +107,25 @@ state.thread = task.spawn(function()
 				local res = table.pack(pcall(function()
 					return ev[method](ev, table.unpack(args, 1, args.n))
 				end))
-				local ok = res[1]
-				-- у InvokeServer явный false в ответе = сервер отказал (нет денег и т.д.)
-				if ok and method == "InvokeServer" and res[2] == false then
-					ok = false
+
+				local stopReason
+				if not res[1] then
+					fails += 1
+					refusals = 0
+					warn("[AutoEgg] Ошибка вызова (" .. fails .. "/" .. MAX_FAILS .. "): " .. tostring(res[2]))
+					if fails >= MAX_FAILS then stopReason = "ошибки вызова: " .. tostring(res[2]) end
+				elseif method == "InvokeServer" and res[2] == false then
+					fails = 0
+					refusals += 1
+					warn("[AutoEgg] Сервер отказал (" .. refusals .. "/" .. MAX_REFUSALS .. "): " .. tostring(res[3]))
+					if refusals >= MAX_REFUSALS then stopReason = "сервер отказывает: " .. tostring(res[3]) end
+				else
+					fails, refusals = 0, 0
 				end
 
-				fails = ok and 0 or (fails + 1)
-				if fails >= MAX_FAILS then
-					turnOff(MAX_FAILS .. " ошибки подряд")
-					fails = 0
+				if stopReason then
+					turnOff(stopReason)
+					fails, refusals = 0, 0
 				else
 					task.wait(DELAY)
 				end
