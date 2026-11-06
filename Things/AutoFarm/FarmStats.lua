@@ -1,10 +1,13 @@
 -- PerHourCounter
--- Под каждой валютой в PlayerGui.Main.Right создаёт уменьшенную копию с доходом в час.
+-- Под каждой валютой в PlayerGui.Main.Right показывает уменьшенную копию с доходом в час.
 --
---   _G.StatsFarm = true   -> показывает доход в час
---   _G.StatsFarm = false  -> убирает копии и останавливает подсчёт
+-- Подсчёт идёт ВСЕГДА, с момента запуска скрипта. Переменная только показывает/прячет GUI:
+--   _G.StatsFarm = true   -> копии с доходом в час на экране
+--   _G.StatsFarm = false  -> копий нет, но подсчёт продолжается
+-- Включишь снова: цифры сразу актуальные, счёт не сбрасывается.
 --
 -- Повторный запуск скрипта останавливает прошлую копию и запускает новую (ничего не накладывается).
+-- Новая копия считает с нуля, потому что это новый запуск.
 -- Если _G.StatsFarm не задана, при запуске она ставится в true.
 
 local FLAG = "StatsFarm"
@@ -15,7 +18,7 @@ if _G[CLEANUP] then
 	_G[CLEANUP] = nil
 end
 if _G[FLAG] == nil then
-	_G[FLAG] = true -- запустил скрипт = хочешь видеть статы. Хочешь, чтобы стартовал выключенным — false
+	_G[FLAG] = true -- запустил скрипт = хочешь видеть статы. Хочешь, чтобы GUI стартовал скрытым — false
 end
 
 local function enabled()
@@ -32,26 +35,26 @@ local SUFFIX      = "/h"     -- подпись: "/ч" или "/h"
 local IGNORE      = { Rank = true } -- какие фреймы пропускать
 -------------------------------------------
 
-local alive, active = true, false
-local sid = 0
-local conns = {}     -- подключения текущей сессии
-local tracked = {}   -- [frame] = st
+local alive = true
+local shown = false      -- показан ли сейчас GUI
+local conns = {}         -- общие подключения
+local tracked = {}       -- [frame] = st (подсчёт + копия)
+local right
 
--- выгрузка (регистрируем сразу, чтобы повторный запуск мог остановить копию, которая ещё ждёт загрузку GUI)
 local function disconnectAll(list)
 	for _, c in ipairs(list) do pcall(function() c:Disconnect() end) end
 	table.clear(list)
 end
 
-local right -- задаётся ниже
+local function destroyClone(st)
+	disconnectAll(st.cloneConns)
+	if st.clone then pcall(function() st.clone:Destroy() end) end
+	st.clone, st.cAmount = nil, nil
+end
 
-local function removeClones()
-	for _, st in pairs(tracked) do
-		disconnectAll(st.conns)
-		if st.clone then pcall(function() st.clone:Destroy() end) end
-	end
-	table.clear(tracked)
-	-- на случай, если остались копии от старой версии скрипта
+-- убрать все копии, в том числе оставшиеся от старой версии скрипта
+local function removeAllClones()
+	for _, st in pairs(tracked) do destroyClone(st) end
 	if right then
 		for _, ch in ipairs(right:GetChildren()) do
 			if ch:GetAttribute("PerHourClone") then pcall(function() ch:Destroy() end) end
@@ -59,12 +62,17 @@ local function removeClones()
 	end
 end
 
+-- выгрузка (регистрируем сразу, чтобы повторный запуск мог остановить копию, которая ещё ждёт загрузку GUI)
 _G[CLEANUP] = function()
 	alive = false
-	active = false
-	sid += 1
+	shown = false
 	disconnectAll(conns)
-	removeClones()
+	for _, st in pairs(tracked) do
+		disconnectAll(st.conns)
+		destroyClone(st)
+	end
+	table.clear(tracked)
+	removeAllClones()
 end
 
 local player = Players.LocalPlayer
@@ -92,16 +100,30 @@ local function short(n)
 	while n >= 1000 and i < #SHORT do n /= 1000; i += 1 end
 	local s = n >= 100 and string.format("%.0f", n) or n >= 10 and string.format("%.1f", n) or string.format("%.2f", n)
 	if s:find("%.") then
-		s = s:gsub("%.?0+$", "") -- убираем нули только после точки ("1.50" -> "1.5", но "150" остаётся "150")
+		s = s:gsub("%.?0+$", "") -- нули убираем только после точки ("1.50" -> "1.5", "150" остаётся "150")
 	end
 	return s .. SHORT[i]
 end
 
-local function setup(frame, ok)
-	if tracked[frame] or IGNORE[frame.Name] or frame:GetAttribute("PerHourClone") then return end
-	if not frame:IsA("GuiObject") then return end
-	local amount = frame:FindFirstChild("Amount")
-	if not (amount and amount:IsA("TextLabel")) then return end
+-- ================== ПОДСЧЁТ (работает всегда) ==================
+local function updateText(st)
+	local now = os.clock()
+	local sum, i = 0, 1
+	while i <= #st.events do
+		local e = st.events[i]
+		if now - e.t > WINDOW then table.remove(st.events, i) else sum += e.d; i += 1 end
+	end
+	if not st.cAmount then return end
+	local elapsed = math.min(WINDOW, now - st.start)
+	if elapsed < 5 then st.cAmount.Text = "..." return end
+	st.cAmount.Text = "+" .. short(sum / elapsed * 3600) .. SUFFIX
+end
+
+-- ================== GUI (зависит от переменной) ==================
+local function makeClone(st)
+	if st.clone or not alive then return end
+	local frame = st.frame
+	if not frame.Parent then return end
 
 	-- 1:1 копия
 	local clone = frame:Clone()
@@ -115,9 +137,14 @@ local function setup(frame, ok)
 		frame.Size.Y.Scale * SCALE_H, frame.Size.Y.Offset * SCALE_H
 	)
 	clone.LayoutOrder = frame.LayoutOrder + 1
+	clone.Visible = frame.Visible
 
 	-- в копии оставляем только наш текст, все остальные надписи удаляем
-	local cAmount = clone.Amount
+	local cAmount = clone:FindFirstChild("Amount")
+	if not cAmount then
+		clone:Destroy()
+		return
+	end
 	for _, d in ipairs(clone:GetDescendants()) do
 		if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
 			if d ~= cAmount then d:Destroy() end
@@ -125,12 +152,24 @@ local function setup(frame, ok)
 	end
 	cAmount.Visible = true
 	cAmount.Text = "..."
-
-	if not ok() then
-		clone:Destroy()
-		return
-	end
 	clone.Parent = right
+
+	st.clone, st.cAmount = clone, cAmount
+	table.insert(st.cloneConns, frame:GetPropertyChangedSignal("LayoutOrder"):Connect(function()
+		clone.LayoutOrder = frame.LayoutOrder + 1
+	end))
+	table.insert(st.cloneConns, frame:GetPropertyChangedSignal("Visible"):Connect(function()
+		clone.Visible = frame.Visible
+	end))
+
+	updateText(st) -- сразу показать актуальное значение
+end
+
+local function setup(frame)
+	if tracked[frame] or IGNORE[frame.Name] or frame:GetAttribute("PerHourClone") then return end
+	if not frame:IsA("GuiObject") then return end
+	local amount = frame:FindFirstChild("Amount")
+	if not (amount and amount:IsA("TextLabel")) then return end
 
 	-- источник числа: видимая надпись с числом в оригинале (или Amount)
 	local icon = frame:FindFirstChild("Icon")
@@ -145,7 +184,10 @@ local function setup(frame, ok)
 		return parse(amount.Text)
 	end
 
-	local st = { last = readValue(), events = {}, start = os.clock(), clone = clone, conns = {} }
+	local st = {
+		frame = frame, last = readValue(), events = {}, start = os.clock(),
+		conns = {}, cloneConns = {},
+	}
 	tracked[frame] = st
 
 	st.poll = function()
@@ -157,80 +199,51 @@ local function setup(frame, ok)
 		st.last = v -- траты (уменьшение) не считаем как минус фарма
 	end
 
-	table.insert(st.conns, frame:GetPropertyChangedSignal("LayoutOrder"):Connect(function()
-		clone.LayoutOrder = frame.LayoutOrder + 1
-	end))
-	table.insert(st.conns, frame:GetPropertyChangedSignal("Visible"):Connect(function()
-		clone.Visible = frame.Visible
-	end))
-
-	st.update = function()
-		local now = os.clock()
-		local sum, i = 0, 1
-		while i <= #st.events do
-			local e = st.events[i]
-			if now - e.t > WINDOW then table.remove(st.events, i) else sum += e.d; i += 1 end
-		end
-		local elapsed = math.min(WINDOW, now - st.start)
-		if elapsed < 5 then cAmount.Text = "..." return end
-		cAmount.Text = "+" .. short(sum / elapsed * 3600) .. SUFFIX
-	end
-
 	table.insert(st.conns, frame.AncestryChanged:Connect(function(_, parent)
 		if parent then return end
 		disconnectAll(st.conns)
-		clone:Destroy()
+		destroyClone(st)
 		tracked[frame] = nil
 	end))
+
+	if shown then makeClone(st) end
 end
 
--- ================== СЕССИЯ (одно включение) ==================
-local function startSession()
-	sid += 1
-	local id = sid
-	local function ok() return alive and active and sid == id end
+for _, child in ipairs(right:GetChildren()) do setup(child) end
+table.insert(conns, right.ChildAdded:Connect(function(child)
+	task.wait(0.1) -- даём игре создать надписи внутри
+	if alive then setup(child) end
+end))
 
-	removeClones() -- на случай копий от старой версии скрипта
-
-	for _, child in ipairs(right:GetChildren()) do setup(child, ok) end
-	table.insert(conns, right.ChildAdded:Connect(function(child)
-		task.wait(0.1) -- даём игре создать надписи внутри
-		if ok() then setup(child, ok) end
-	end))
-
-	task.spawn(function()
-		local acc = 0
-		while ok() do
-			acc += task.wait(0.2)
-			if not ok() then break end
-			for _, st in pairs(tracked) do st.poll() end
-			if acc >= 1 then
-				acc = 0
-				for _, st in pairs(tracked) do st.update() end
-			end
+-- цикл подсчёта: идёт всегда
+task.spawn(function()
+	local acc = 0
+	while alive do
+		acc += task.wait(0.2)
+		if not alive then break end
+		for _, st in pairs(tracked) do st.poll() end
+		if acc >= 1 then
+			acc = 0
+			for _, st in pairs(tracked) do updateText(st) end
 		end
-	end)
-end
+	end
+end)
 
-local function stopSession()
-	sid += 1
-	disconnectAll(conns)
-	removeClones()
-end
+-- ================== ПЕРЕКЛЮЧАТЕЛЬ GUI ==================
+removeAllClones() -- копии от старой версии скрипта, если остались
 
--- ================== ПЕРЕКЛЮЧАТЕЛЬ ==================
 task.spawn(function()
 	while alive do
 		local want = enabled()
-		if want and not active then
-			active = true
-			startSession()
-		elseif not want and active then
-			active = false
-			stopSession()
+		if want and not shown then
+			shown = true
+			for _, st in pairs(tracked) do makeClone(st) end
+		elseif not want and shown then
+			shown = false
+			removeAllClones()
 		end
 		task.wait(0.2)
 	end
 end)
 
-print(("[StatsFarm] загружен. Включить: _G.%s = true, выключить: _G.%s = false"):format(FLAG, FLAG))
+print(("[StatsFarm] загружен, подсчёт идёт. Показать GUI: _G.%s = true, спрятать: _G.%s = false"):format(FLAG, FLAG))
