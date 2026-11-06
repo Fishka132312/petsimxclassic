@@ -4,11 +4,17 @@ local CheatName = "Evade"
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
+local DEBUG = true -- печатает в F9 что приходит из дропдауна; потом поставь false
+
+local function dprint(...)
+	if DEBUG then print("[GUI]", ...) end
+end
+
 local scripts = {
   'AutoFarm/AutoCollectLootBags.lua',
   'AutoFarm/AutoCollectOrbs.lua',
   'AutoFarm/AutoFarm.lua',
-  'Eggs/EggsOpen.lua',
+  -- 'Eggs/EggsOpen.lua', -- раскомментируй, если нужна вкладка Eggs
 }
 
 local baseUrl = 'https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/'
@@ -51,6 +57,42 @@ local Window = Library:Window({
     Logo = "https://i.postimg.cc/R09KZw72/Bez-imeni-1.png"
 })
 
+-------------------------Helpers-----------------------
+
+-- Приводит значение дропдауна к списку строк
+local function normalize(Value)
+	if type(Value) == "table" then
+		local list = {}
+		for k, v in pairs(Value) do
+			if type(v) == "string" then
+				table.insert(list, v)
+			elseif v == true and type(k) == "string" then
+				table.insert(list, k)
+			end
+		end
+		table.sort(list)
+		return list
+	end
+	if type(Value) == "string" and Value ~= "" then
+		return { Value }
+	end
+	return {}
+end
+
+-- Обновление списка в дропдауне (подбираем метод, который есть у библиотеки)
+local function pushItems(dropdown, items)
+	for _, method in ipairs({ "Refresh", "SetItems", "SetOptions", "SetValues" }) do
+		if type(dropdown[method]) == "function" then
+			if pcall(dropdown[method], dropdown, items) then
+				dprint("список обновлён методом", method)
+				return true
+			end
+		end
+	end
+	dprint("у дропдауна нет метода обновления списка")
+	return false
+end
+
 -------------------------Event-----------------------
 
 local AutoFarmCat = Window:Category("Event")
@@ -88,25 +130,19 @@ end
 
 local selectedLocations = {}
 
--- Приводит значение дропдауна к списку строк
-local function normalize(Value)
-	if type(Value) == "table" then
-		local list = {}
-		for k, v in pairs(Value) do
-			if type(v) == "string" then
-				table.insert(list, v)
-			elseif v == true and type(k) == "string" then
-				table.insert(list, k)
-			end
-		end
-		return list
-	end
-	return Value and { Value } or {}
-end
-
 local function getLocationItems()
 	local tools = _G.PetTools
 	return tools and tools.CoinManager.GetLocationNames() or {}
+end
+
+-- Ждём, пока появятся локации (монеты могут прогрузиться не сразу)
+do
+	local waited = 0
+	while #getLocationItems() == 0 and waited < 15 do
+		task.wait(0.5)
+		waited += 0.5
+	end
+	dprint("локаций на старте:", #getLocationItems())
 end
 
 local LocationDropdown = AutoFarmSection:Dropdown({
@@ -114,18 +150,28 @@ local LocationDropdown = AutoFarmSection:Dropdown({
 	Tooltip = "Choose locations for pets farming",
 	Flag = "FarmLocations",
 	Items = getLocationItems(),
-	Default = {},
 	Multi = true,
-	Size = 125,
-	OptionHolderSize = 125,
 	Callback = function(Value)
+		if DEBUG then
+			dprint("callback:", typeof(Value), Value)
+			if type(Value) == "table" then
+				for k, v in pairs(Value) do dprint("   ", k, v) end
+			end
+		end
+
 		selectedLocations = normalize(Value)
+		dprint("выбрано:", table.concat(selectedLocations, ", "))
+
 		local tools = _G.PetTools
 		if tools and tools.AutoFarm.Enabled and #selectedLocations > 0 then
 			tools.AutoFarm.Location = selectedLocations
 		end
 	end
 })
+
+if DEBUG then
+	for k, v in pairs(LocationDropdown) do dprint("dropdown:", k, typeof(v)) end
+end
 
 local PetsFarmToggle = AutoFarmSection:Toggle({
 	Name = "Pets Auto Farm",
@@ -160,20 +206,16 @@ local PetsFarmToggle = AutoFarmSection:Toggle({
 	end
 })
 
--- Автообновление списка локаций (если у дропдауна есть метод обновления)
+-- Автообновление списка локаций
 task.spawn(function()
 	local last = table.concat(getLocationItems(), "|")
 	while true do
 		task.wait(5)
 		local items = getLocationItems()
 		local sig = table.concat(items, "|")
-		if sig ~= last then
+		if sig ~= last and #items > 0 then
 			last = sig
-			for _, method in ipairs({ "Refresh", "SetItems", "SetOptions", "SetValues" }) do
-				if type(LocationDropdown[method]) == "function" then
-					if pcall(LocationDropdown[method], LocationDropdown, items) then break end
-				end
-			end
+			pushItems(LocationDropdown, items)
 		end
 	end
 end)
@@ -245,16 +287,6 @@ local selectedAmount = 1
 local function getEggItems()
 	local tools = _G.EggTools
 	return tools and tools.GetEggNames() or {}
-end
-
--- Обновление списка в дропдауне (подбираем метод, который есть у твоей библиотеки)
-local function pushItems(dropdown, items)
-	for _, method in ipairs({ "Refresh", "SetItems", "SetOptions", "SetValues" }) do
-		if type(dropdown[method]) == "function" then
-			if pcall(dropdown[method], dropdown, items) then return true end
-		end
-	end
-	return false
 end
 
 local EggsSection = EggsPage:Section({Name = "Auto Open", Side = 1, Icon = "https://i.postimg.cc/tCDF4BRx/Bez-imeni-1.png"})
