@@ -5,9 +5,6 @@
 --// itself turns into a full list of every pet in the game (same cell design, same search box).
 --// CHANCES: button "Chances" (left edge) or RightControl = panel to set luck / Golden / Rainbow / Shiny / Dark Matter % and a favourite pet for local egg & gift opening.
 --// Click a skin to apply it. Esc cancels. The picker opens only on the RIGHT mouse button; choosing a skin is a normal left click. Left click on a pet with a gift/egg skin opens it locally.
---//
---// MASTER SWITCH:  _G.PetChanger = true  -> everything works (skins, picker, eggs, Chances)
---//                 _G.PetChanger = false -> all pets look normal again (default). Set it to true again and your skins come back.
 
 -- one instance only: running the script again fully stops the previous run first, then starts fresh
 local ENV = (type(getgenv) == "function" and getgenv()) or _G
@@ -18,13 +15,10 @@ for _, holder in ipairs({ ENV, _G }) do
 	end
 end
 
--- master switch: off by default (only set when the variable does not exist yet, so a value you set before running is kept)
-if _G.PetChanger == nil then
-	_G.PetChanger = false
-end
-local function changerWanted()
-	return _G.PetChanger == true or ENV.PetChanger == true
-end
+-- _G.PetsChanger: true = skin changer works, false = every skin is rolled back and nothing can be changed.
+-- Always OFF when the script starts; set _G.PetsChanger = true to turn it on.
+_G.PetsChanger = false
+local changerOn = false
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -132,6 +126,13 @@ local function saveVariants()
 end
 
 loadVariants()
+
+-- changer starts OFF: the saved skins wait in this stash until _G.PetsChanger = true
+local stash = { skins = {}, variants = {} }
+for uid, v in pairs(skins) do stash.skins[uid] = v end
+for uid, v in pairs(variants) do stash.variants[uid] = v end
+table.clear(skins)
+table.clear(variants)
 
 -- put the chosen look onto a (cloned) pet table
 local function applyVariant(data, uid)
@@ -1649,7 +1650,7 @@ local function syncGiftOverlays()
 					btn.Parent = cell
 					btn.Activated:Connect(function()
 						warn("[PetSkins] overlay activated for " .. tostring(uid))
-						if changerWanted() and skins[uid] and isGiftSkin(skins[uid]) then
+						if skins[uid] and isGiftSkin(skins[uid]) then
 							task.spawn(function()
 								local ok, err = xpcall(openGiftLocal, debug.traceback, uid)
 								if not ok then
@@ -1701,6 +1702,9 @@ end)
 -- apply / reset
 ----------------------------------------------------------------------
 local function applySkin(uid, skinId, variant)
+	if not changerOn then
+		return
+	end
 	rememberName(uid, skins[uid])
 	local real = origGet(uid)
 	rememberName(uid, real and real.id)
@@ -1714,6 +1718,9 @@ local function applySkin(uid, skinId, variant)
 end
 
 local function resetSkin(uid)
+	if not changerOn then
+		return
+	end
 	rememberName(uid, skins[uid])
 	skins[uid] = nil
 	variants[uid] = nil
@@ -1724,6 +1731,9 @@ local function resetSkin(uid)
 end
 
 local function resetAll()
+	if not changerOn then
+		return
+	end
 	local list = {}
 	for uid in pairs(skins) do
 		list[#list + 1] = uid
@@ -3127,9 +3137,6 @@ local function makeCell(parent, order, entry, resetPet)
 		if not uid then
 			return
 		end
-		if not changerWanted() then
-			return -- master switch is off: nothing gets applied
-		end
 		if resetPet then
 			resetSkin(uid)
 			rebuildItem(uid)
@@ -3146,9 +3153,6 @@ local function makeCell(parent, order, entry, resetPet)
 				if not variant then
 					return -- cancelled: keep the current look
 				end
-			end
-			if not changerWanted() then
-				return
 			end
 			applySkin(uid, entry.id, variant)
 		end
@@ -3427,8 +3431,8 @@ connections[#connections + 1] = UserInputService.InputBegan:Connect(function(inp
 	if input.UserInputType ~= Enum.UserInputType.MouseButton2 then
 		return
 	end
-	if not changerWanted() then
-		return -- master switch (_G.PetChanger) is off: the picker never opens
+	if not changerOn then
+		return
 	end
 	if not inventoryOpen() then
 		return
@@ -3824,18 +3828,75 @@ local chancesGui
 		setOpen(false)
 	end)
 	connections[#connections + 1] = UserInputService.InputBegan:Connect(function(input, gp)
-		if not unloaded and not gp and changerWanted() and input.KeyCode == Enum.KeyCode.RightControl then
+		if not unloaded and not gp and input.KeyCode == Enum.KeyCode.RightControl then
 			setOpen(not chancesPanel.Visible)
 		end
 	end)
-	-- used by the master switch: closes the panel when PetChanger is turned off
-	chancesGui:SetAttribute("PetSkinsPanelOwner", true)
-	CHX.closePanel = function()
-		setOpen(false)
-	end
 	refreshScopes()
 	refreshBoxes()
 end)()
+
+----------------------------------------------------------------------
+-- _G.PetsChanger switch (ON = works, OFF = all pets back to normal, changing is locked)
+----------------------------------------------------------------------
+local function setChanger(on)
+	if on == changerOn then
+		return
+	end
+	if on then
+		changerOn = true
+		local uids = {}
+		for uid, v in pairs(stash.skins) do
+			skins[uid] = v
+			uids[#uids + 1] = uid
+		end
+		for uid, v in pairs(stash.variants) do
+			variants[uid] = v
+		end
+		table.clear(stash.skins)
+		table.clear(stash.variants)
+		table.clear(iconCache)
+		for _, uid in ipairs(uids) do
+			pcall(respawn, uid)
+			pcall(rebuildItem, uid)
+		end
+	else
+		changerOn = false -- locks applySkin / resetSkin / picker first
+		pcall(closePicker)
+		local uids = {}
+		for uid, v in pairs(skins) do
+			stash.skins[uid] = v
+			uids[#uids + 1] = uid
+		end
+		for uid, v in pairs(variants) do
+			stash.variants[uid] = v
+		end
+		for _, uid in ipairs(uids) do
+			skins[uid] = nil
+			variants[uid] = nil
+		end
+		table.clear(iconCache)
+		pcall(clearGiftOverlays)
+		for _, uid in ipairs(uids) do
+			pcall(restoreIcon, uid)
+			pcall(respawn, uid)
+			pcall(rebuildItem, uid)
+		end
+	end
+end
+
+connections[#connections + 1] = RunService.Heartbeat:Connect(function()
+	if unloaded then
+		return
+	end
+	local want = _G.PetsChanger == true
+	if want ~= changerOn then
+		local ok, err = pcall(setChanger, want)
+		if not ok then
+			warn("[PetSkins] PetsChanger switch error: " .. tostring(err))
+		end
+	end
+end)
 
 ----------------------------------------------------------------------
 -- unload
@@ -3885,94 +3946,11 @@ ENV.PetSkinsUnload = function()
 	ENV.PetSkinsResetAll = nil
 end
 
-----------------------------------------------------------------------
--- MASTER SWITCH: _G.PetChanger
---   false (default) = every pet looks normal, picker / Chances / local egg opening are disabled
---   true            = everything works, your saved skins are applied again
--- The switch can be flipped at any time, it is checked every frame. Saved files are never touched
--- by the switch: skins are only hidden in memory while it is off.
-----------------------------------------------------------------------
-do
-	local changerOn = true -- right after loading, the skins from the save file are active
-	local stashSkins, stashVariants = {}, {}
-
-	local function setChanger(on)
-		if on == changerOn then
-			return
-		end
-		changerOn = on
-		pcall(closePicker)
-		pcall(hideDrops)
-		pcall(function()
-			Library.InfoOverlay.Remove()
-		end)
-
-		if on then
-			-- bring the hidden skins back
-			for uid, id in pairs(stashSkins) do
-				skins[uid] = id
-			end
-			for uid, v in pairs(stashVariants) do
-				variants[uid] = v
-			end
-			stashSkins, stashVariants = {}, {}
-			pcall(adoptExisting)
-			local uids = {}
-			for uid in pairs(skins) do
-				uids[#uids + 1] = uid
-			end
-			for _, uid in ipairs(uids) do
-				iconCache[uid] = nil
-				levelCache[uid] = nil
-				pcall(respawn, uid)
-				pcall(rebuildItem, uid)
-			end
-		else
-			-- hide the skins (memory only) and put every pet back to normal
-			pcall(adoptExisting)
-			local uids = {}
-			for uid, id in pairs(skins) do
-				stashSkins[uid] = id
-				uids[#uids + 1] = uid
-			end
-			for uid, v in pairs(variants) do
-				stashVariants[uid] = v
-			end
-			table.clear(skins)
-			table.clear(variants)
-			pcall(clearGiftOverlays)
-			for _, uid in ipairs(uids) do
-				levelCache[uid] = nil
-				pcall(restoreIcon, uid)
-				pcall(respawn, uid)
-				pcall(rebuildItem, uid)
-			end
-			if CHX.closePanel then
-				pcall(CHX.closePanel)
-			end
-		end
-
-		if chancesGui then
-			chancesGui.Enabled = on
-		end
+-- saved skins: pick up already-spawned pets and apply their skins right away
+adoptExisting()
+task.defer(function()
+	for uid in pairs(skins) do
+		pcall(respawn, uid)
+		pcall(rebuildItem, uid)
 	end
-
-	connections[#connections + 1] = RunService.RenderStepped:Connect(function()
-		if unloaded then
-			return
-		end
-		setChanger(changerWanted())
-	end)
-
-	-- start state: apply right away (off by default -> pets are restored to normal)
-	adoptExisting()
-	setChanger(changerWanted())
-	if changerOn then
-		task.defer(function()
-			for uid in pairs(skins) do
-				pcall(respawn, uid)
-				pcall(rebuildItem, uid)
-			end
-		end)
-	end
-end
+end)
