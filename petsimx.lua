@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----33
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----533
 local CheatName = "Evade"
 
 local Players = game:GetService("Players")
@@ -366,7 +366,7 @@ EggSection:Slider({
 
 EggSection:Toggle({
 	Name = "Teleport to egg",
-	Tooltip = "Teleports to the egg if you are too far away",
+	Tooltip = "Teleports to the egg (switches world if the egg is in another one). Required for eggs from other worlds",
 	Flag = "EggTeleport",
 	Default = false,
 	Callback = function(Value)
@@ -455,7 +455,7 @@ EggSection:Button({
 
 EggSection:Button({
 	Name = "Refresh egg list",
-	Tooltip = "Rescans eggs on the map",
+	Tooltip = "Refreshes the list of all eggs you can open",
 	Callback = function()
 		local tools = _G.EggTools
 		if not tools then return end
