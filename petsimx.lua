@@ -323,6 +323,9 @@ local function rebuildEggItems(callback)
 		end
 
 		-- все яйца игры из всех миров (доступные игроку)
+		if not tools.GetAllEggs then
+			warn("[Eggs] В EggsOpen.lua нет GetAllEggs — на GitHub лежит старая версия, обнови файл Eggs/EggsOpen.lua")
+		end
 		if tools.GetAllEggs then
 			local ok, list = pcall(tools.GetAllEggs)
 			if ok and type(list) == "table" then
