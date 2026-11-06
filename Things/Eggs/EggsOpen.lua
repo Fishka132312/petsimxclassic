@@ -356,6 +356,162 @@ end
 EggTools.AutoOpen = AutoOpen
 _G.EggTools = EggTools
 
+--------------------------------------------------------------------------------
+-- 4. ОТКЛЮЧЕНИЕ АНИМАЦИИ ОТКРЫТИЯ ЯИЦ
+-- Управление переменной:
+--   _G.NoEggAnimation = true   -- анимации нет (яйца открываются мгновенно)
+--   _G.NoEggAnimation = false  -- обычная анимация
+-- Подмена ставится один раз, дальше переменную можно менять сколько угодно.
+--------------------------------------------------------------------------------
+if _G.NoEggAnimation == nil then
+	_G.NoEggAnimation = false
+end
+
+local NoAnim = { Method = nil, Installed = false }
+
+-- Мгновенная замена OpenEgg: те же сигналы и счётчик, но без анимации
+local function InstantOpen(eggName, pets)
+	local vars = Lib.Variables
+
+	env.__LastEggOpen = {
+		egg = eggName,
+		count = (type(pets) == "table") and #pets or 1,
+	}
+
+	vars.OpeningEgg = vars.OpeningEgg + 1
+	Lib.Signal.Fire("Opening Egg", eggName)
+
+	game:GetService("RunService").Heartbeat:Wait() -- кадр, чтобы остальные скрипты успели среагировать
+
+	vars.OpeningEgg = math.max(vars.OpeningEgg - 1, 0)
+	Lib.Signal.Fire("Done Opening Egg", eggName)
+end
+
+local function installNoAnim()
+	if env.__NoEggAnimInstalled then
+		NoAnim.Installed = true
+		NoAnim.Method = env.__NoEggAnimInstalled
+		return
+	end
+
+	-- ждём загрузку игровой библиотеки
+	local waited = 0
+	while not getLib() and waited < 20 do
+		task.wait(0.5)
+		waited += 0.5
+	end
+	if not Lib then
+		warn("[NoEggAnim] Библиотека игры не найдена")
+		return
+	end
+	while not Lib.Loaded do
+		game:GetService("RunService").Heartbeat:Wait()
+	end
+
+	local isExec = isexecutorclosure or checkclosure or function() return false end
+
+	local function looksRight(f)
+		local ok, consts = pcall(debug.getconstants, f)
+		if not ok or type(consts) ~= "table" then return true end
+		return table.find(consts, "Opening Egg") ~= nil
+	end
+
+	local function findOpenEgg()
+		if not (getgc and islclosure and debug.info) then return nil end
+		for _, f in ipairs(getgc()) do
+			if type(f) == "function" and islclosure(f) and not isExec(f)
+				and debug.info(f, "n") == "OpenEgg" and looksRight(f) then
+				return f
+			end
+		end
+	end
+
+	local target
+	for _ = 1, 20 do -- ждём до ~10 сек, вдруг игра ещё грузится
+		target = findOpenEgg()
+		if target then break end
+		task.wait(0.5)
+	end
+
+	local method
+
+	-- Способ 1: подмена функции. Обёртка сама смотрит на переменную:
+	-- включено -> мгновенная версия, выключено -> оригинал.
+	if target and hookfunction then
+		local old
+		local ok = pcall(function()
+			old = hookfunction(target, function(...)
+				if _G.NoEggAnimation then
+					return InstantOpen(...)
+				end
+				return old(...)
+			end)
+		end)
+		if ok and old then method = "hookfunction" end
+	end
+
+	-- Способ 2 (запасной): подписки игры выключаются/включаются по переменной
+	if not method and getconnections then
+		local ok = pcall(function()
+			local sources = {
+				Lib.Network.Fired("Open Egg"),
+				Lib.Signal.Fired("Open Egg"),
+			}
+			local original = {}
+			for _, sig in ipairs(sources) do
+				for _, c in ipairs(getconnections(sig)) do
+					original[#original + 1] = c
+				end
+			end
+			for _, sig in ipairs(sources) do
+				sig:Connect(function(eggName, pets)
+					if _G.NoEggAnimation then
+						task.spawn(InstantOpen, eggName, pets)
+					end
+				end)
+			end
+
+			local applied = false
+			task.spawn(function()
+				while _G.EggToolsGen == myGen do
+					local want = _G.NoEggAnimation and true or false
+					if want ~= applied then
+						applied = want
+						for _, c in ipairs(original) do
+							pcall(function()
+								if want then c:Disable() else c:Enable() end
+							end)
+						end
+					end
+					task.wait(0.2)
+				end
+				-- скрипт перезапущен: возвращаем оригинальные подписки
+				for _, c in ipairs(original) do pcall(function() c:Enable() end) end
+			end)
+		end)
+		if ok then method = "getconnections" end
+	end
+
+	if method then
+		env.__NoEggAnimInstalled = method
+		NoAnim.Installed = true
+		NoAnim.Method = method
+		warn("[NoEggAnim] Готово (способ: " .. method .. "). _G.NoEggAnimation = true / false")
+	else
+		warn("[NoEggAnim] Не удалось: нет hookfunction/getconnections или функция OpenEgg не найдена")
+	end
+end
+
+function EggTools.SetNoAnimation(value)
+	_G.NoEggAnimation = value and true or false
+end
+
+function EggTools.IsNoAnimationReady()
+	return NoAnim.Installed, NoAnim.Method
+end
+
+task.spawn(installNoAnim)
+
 task.spawn(function()
 	while _G.EggToolsGen == myGen do
 		local ok, err = pcall(function()
@@ -371,3 +527,4 @@ end)
 task.spawn(getLib)
 
 print("[Eggs] Готово. Открой яйцо вручную ОДИН раз (скрипт поймает ремоут), затем _G.EggTools.AutoOpen.Start('Cracked Egg', 3) / .Stop()")
+print("[Eggs] Анимация яиц: _G.NoEggAnimation = true / false")
