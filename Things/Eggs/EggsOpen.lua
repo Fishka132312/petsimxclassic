@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------222
+--------------------------------------------------------------------------------
 -- КОНФИГ
 --------------------------------------------------------------------------------
 local CONFIG = {
@@ -477,37 +477,63 @@ local EggTools = {}
 
 function EggTools.Refresh() scanEggs() end
 
--- Все яйца игры (включая другие миры): { name, area, world, here }
--- here = яйцо в текущем мире. Список для UI-выбора яйца.
-function EggTools.GetAllEggs()
+-- Копия игровой проверки IsEggUnlocked (из Eggs.lua игры): можно ли открыть яйцо.
+-- Любая ошибка внутри = яйцо НЕ скрываем.
+local function eggAvailable(L, name, depth)
+	depth = depth or 0
+	if depth > 6 then return true end
+	local dir = L.Directory
+	local e = dir.Eggs[name]
+	if type(e) ~= "table" then return false end
+	local save = L.Save and L.Save.Get and L.Save.Get()
+	local hard = L.Shared and L.Shared.IsHardcore
+
+	if e.areaRequired and e.area and L.WorldCmds.HasArea(e.area) == false then
+		return false
+	end
+	if type(e.eggRequired) == "string" and e.eggRequired ~= "" and e.eggRequired ~= name then
+		if dir.Eggs[e.eggRequired] and not eggAvailable(L, e.eggRequired, depth + 1) then
+			return false
+		end
+	end
+	if save and (tonumber(e.eggRequiredOpenAmount) or 0) > 0 and e.eggRequired ~= "" then
+		local opened = (hard and save.Hardcore and save.Hardcore.EggsOpened or save.EggsOpened) or {}
+		local n = opened[e.eggRequired]
+		if not n or n < e.eggRequiredOpenAmount then return false end
+	end
+	if save then
+		if name == "Dominus Egg" then
+			if not (hard and save.Hardcore and save.Hardcore.OwnsDominusGate or (not hard and save.OwnsDominusGate)) then return false end
+		end
+		if name == "Hacker Egg" or name == "Hacker Golden Egg" then
+			if not (hard and save.Hardcore and save.Hardcore.OwnsHackerGate or (not hard and save.OwnsHackerGate)) then return false end
+		end
+	end
+	return true
+end
+
+-- Все яйца игры (включая другие миры), которые игрок может открыть:
+-- { name, area, world, here }. here = яйцо в текущем мире. Список для UI.
+-- onlyAvailable = false -> вернуть вообще все яйца из Directory.
+function EggTools.GetAllEggs(onlyAvailable)
 	local L = getLib()
 	local dir = L and L.Directory
 	local out = {}
 	if not (dir and dir.Eggs) then return out end
 	local cw = curWorld()
-	-- доступ проверяем один раз на мир / область (а не на каждое яйцо)
-	local worldOk, areaOk = {}, {}
-	-- если проверку сделать не удалось (ошибка) — яйцо НЕ скрываем
-	local function allowed(cache, fn, key)
-		local v = cache[key]
-		if v == nil then
-			local ok, res = pcall(fn, key)
-			v = (not ok) or (res ~= false and res ~= nil)
-			cache[key] = v
-		end
-		return v
-	end
 	for name in pairs(dir.Eggs) do
 		if type(name) == "string" then
 			local info = eggInfo(name)
-			if info and allowed(worldOk, L.WorldCmds.HasAccess, info.world)
-				and allowed(areaOk, L.WorldCmds.HasArea, info.area) then
-				out[#out + 1] = { name = name, area = info.area, world = info.world, here = (info.world == cw) }
+			if info then
+				local ok, avail = pcall(eggAvailable, L, name)
+				if onlyAvailable == false or (not ok) or avail then
+					out[#out + 1] = { name = name, area = info.area, world = info.world, here = (info.world == cw) }
+				end
 			end
 		end
 	end
 	table.sort(out, function(a, b)
-		if a.world ~= b.world then return tostring(a.world) < tostring(b.world) end
+		if tostring(a.world) ~= tostring(b.world) then return tostring(a.world) < tostring(b.world) end
 		return a.name < b.name
 	end)
 	return out
