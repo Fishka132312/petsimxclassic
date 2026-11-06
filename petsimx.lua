@@ -13,7 +13,17 @@ end
 local scripts = {
   'AutoFarm/AutoCollectOrbsLootBags.lua',
   'AutoFarm/AutoFarm.lua',
-  -- 'Eggs/EggsOpen.lua', -- раскомментируй, если нужна вкладка Eggs
+  'AutoFarm/FarmStats.lua',
+  'Eggs/EggsOpen.lua',
+  'JustAutoOpen.lua',
+  'Auto/AutoGolden.lua',
+  'Auto/AutoRainbow.lua',
+  'Auto/AutoIndex.lua',
+  'Misc/AntiLag.lua',
+  'Misc/AntiLag2.lua',
+  'Misc/AntiLag3.lua',
+  'Misc/AntiLag4.lua',
+  'Custom/Teams.lua',
 }
 
 local baseUrl = 'https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/'
@@ -221,7 +231,7 @@ end)
 
 local AutoFarmToggle = AutoFarmSection:Toggle({
     Name = "Auto Collect LootBags/Orbs",
-	Tooltip = "Automatically collects event bubbles on the map",
+	Tooltip = "Automatically collects Orbs And Lootbags",
     Flag = "AutoCollectOrbsLootbags",
     Default = false,
     Callback = function(Value)
@@ -229,30 +239,21 @@ local AutoFarmToggle = AutoFarmSection:Toggle({
     end
 })
 
+local AutoFarmToggle = AutoFarmSection:Toggle({
+    Name = "Stats",
+	Tooltip = "Showing stats per hour",
+    Flag = "StatsFarm",
+    Default = false,
+    Callback = function(Value)
+        _G.StatsFarm  = Value
+    end
+})
+
+
 
 local ThingsEventSection = EventPage:Section({Name = "Things", Side = 2, icon = "https://i.postimg.cc/cH8VsKQf/Bez-imeni-1.png"})
 
-local Disable3dRenderToggle = ThingsEventSection:Toggle({
-    Name = "Disable 3d Render",
-	Tooltip = "Disables world rendering. FPS boost",
-    Flag = "Disable3d",
-    Default = false,
-    Callback = function(Value)
-       local RunService = game:GetService("RunService")
-        RunService:Set3dRenderingEnabled(not Value)
-    end
-})
 
-
-local EspBubblesToggle = ThingsEventSection:Toggle({
-    Name = "Esp Bubbles",
-	Tooltip = "Shows bubbles through the walls",
-    Flag = "EspBubbles",
-    Default = false,
-    Callback = function(Value)
-        _G.EspTickets = Value
-    end
-})
 
 -------------------------Eggs-----------------------
 -- Логика лежит в Eggs/EggsOpen.lua (он создаёт _G.EggTools при загрузке)
@@ -266,9 +267,9 @@ end
 
 local EggsCat = Window:Category("Eggs")
 local EggsPage = Window:Page({
-		Name = "Eggs",
-		Icon = "https://i.postimg.cc/6q7p8GSZ/Bez-imeni-2.png",
-		Category = EggsCat
+	Name = "Eggs",
+	Icon = "https://i.postimg.cc/6q7p8GSZ/Bez-imeni-2.png",
+	Category = EggsCat
 })
 
 local selectedEgg = nil
@@ -279,45 +280,94 @@ local function getEggItems()
 	return tools and tools.GetEggNames() or {}
 end
 
-local EggsSection = EggsPage:Section({Name = "Auto Open", Side = 1, Icon = "https://i.postimg.cc/tCDF4BRx/Bez-imeni-1.png"})
+-- Ждём, пока скрипт отсканирует яйца на карте
+do
+	local waited = 0
+	while #getEggItems() == 0 and waited < 10 do
+		task.wait(0.5)
+		waited += 0.5
+	end
+	dprint("яиц на старте:", #getEggItems())
+end
 
-EggsSection:Paragraph({
-	Name = "Auto Open Eggs",
-	Text = "Pick an egg and an amount, then enable the toggle. Stand near the egg or enable Teleport To Egg."
+local EggSection = EggsPage:Section({ Name = "Egg Opener", Side = 1 })
+
+local EggInfo = EggSection:Paragraph({
+	Name = "Status",
+	Text = "Open any egg manually once so the script learns the remote."
 })
 
-EggsSection:Divider()
+EggSection:Divider()
 
-local EggDropdown = EggsSection:Dropdown({
+local EggDropdown = EggSection:Dropdown({
 	Name = "Egg",
-	Tooltip = "Eggs available in the current world",
-	Flag = "EggToOpen",
+	Tooltip = "Choose the egg to open",
+	Flag = "EggSelected",
 	Items = getEggItems(),
 	Multi = false,
-	Size = 125,
-	OptionHolderSize = 125,
 	Callback = function(Value)
 		selectedEgg = normalize(Value)[1]
+		dprint("яйцо:", tostring(selectedEgg))
+		local tools = _G.EggTools
+		if tools then tools.AutoOpen.Egg = selectedEgg end
 	end
 })
 
-local EggAmountDropdown = EggsSection:Dropdown({
+EggSection:Dropdown({
 	Name = "Amount",
-	Tooltip = "How many eggs to open per purchase (3 needs the Triple Egg gamepass)",
+	Tooltip = "How many eggs per purchase",
 	Flag = "EggAmount",
-	Items = { "1", "3" },
+	Items = { "1", "3", "8" },
 	Default = "1",
 	Multi = false,
-	Size = 60,
-	OptionHolderSize = 60,
 	Callback = function(Value)
 		selectedAmount = tonumber(normalize(Value)[1]) or 1
+		local tools = _G.EggTools
+		if tools then tools.AutoOpen.Amount = selectedAmount end
 	end
 })
 
-local EggOpenToggle = EggsSection:Toggle({
+EggSection:Slider({
+	Name = "Delay",
+	Tooltip = "Pause between purchases. Do not set too low",
+	Flag = "EggDelay",
+	Min = 0.05,
+	Max = 2,
+	Default = 0.3,
+	Decimals = 0.05,
+	Suffix = " s",
+	Callback = function(Value)
+		local tools = _G.EggTools
+		if tools then tools.AutoOpen.Delay = Value end
+	end
+})
+
+EggSection:Toggle({
+	Name = "Teleport to egg",
+	Tooltip = "Teleports to the egg if you are too far away",
+	Flag = "EggTeleport",
+	Default = false,
+	Callback = function(Value)
+		local tools = _G.EggTools
+		if tools then tools.AutoOpen.Teleport = Value end
+	end
+})
+
+EggSection:Toggle({
+	Name = "Wait animation",
+	Tooltip = "Waits for the opening animation before the next purchase",
+	Flag = "EggWaitAnim",
+	Default = false,
+	Callback = function(Value)
+		local tools = _G.EggTools
+		if tools then tools.AutoOpen.WaitAnimation = Value end
+	end
+})
+
+local AutoEggToggle
+AutoEggToggle = EggSection:Toggle({
 	Name = "Auto Open Eggs",
-	Tooltip = "Keeps buying the selected egg",
+	Tooltip = "Opens the selected egg repeatedly",
 	Flag = "AutoOpenEggs",
 	Default = false,
 	Callback = function(Value)
@@ -331,29 +381,38 @@ local EggOpenToggle = EggsSection:Toggle({
 			return
 		end
 
+		local auto = tools.AutoOpen
+
 		if Value then
-			if not selectedEgg then
+			local egg = selectedEgg or tools.GetLearnedEgg()
+			if not egg then
 				Library:Notification({
 					Title = "Eggs",
 					Description = "Select an egg first",
 					Duration = 3
 				})
+				AutoEggToggle:Set(false)
 				return
 			end
-			tools.AutoOpen.Stop()
-			tools.AutoOpen.Start(selectedEgg, selectedAmount)
+			auto.Stop()
+			auto.Amount = selectedAmount
+			auto.Delay = Library.Flags["EggDelay"] or auto.Delay
+			auto.Teleport = Library.Flags["EggTeleport"] and true or false
+			auto.WaitAnimation = Library.Flags["EggWaitAnim"] and true or false
+			auto.Start(egg, selectedAmount)
 		else
-			tools.AutoOpen.Stop()
+			auto.Stop()
 		end
 	end
 })
 
-EggsSection:Button({
+EggSection:Button({
 	Name = "Open Once",
 	Tooltip = "Buys the selected egg a single time",
 	Callback = function()
 		local tools = _G.EggTools
-		if not tools or not selectedEgg then
+		local egg = selectedEgg or (tools and tools.GetLearnedEgg())
+		if not tools or not egg then
 			Library:Notification({
 				Title = "Eggs",
 				Description = "Select an egg first",
@@ -362,82 +421,183 @@ EggsSection:Button({
 			return
 		end
 		task.spawn(function()
-			local ok, msg = tools.OpenOnce(selectedEgg, selectedAmount)
+			local ok, msg = tools.OpenOnce(egg, selectedAmount)
 			Library:Notification({
 				Title = "Eggs",
-				Description = ok and "Opened" or tostring(msg or "Failed"),
+				Description = ok and ("Opened: " .. egg) or ("Failed: " .. tostring(msg)),
 				Duration = 3
 			})
 		end)
 	end
 })
 
-EggsSection:Button({
-	Name = "Refresh Egg List",
-	Tooltip = "Rescan eggs in the current world",
+EggSection:Button({
+	Name = "Refresh egg list",
+	Tooltip = "Rescans eggs on the map",
 	Callback = function()
 		local tools = _G.EggTools
 		if not tools then return end
 		task.spawn(function()
 			tools.Refresh()
-			pushItems(EggDropdown, getEggItems())
+			local items = getEggItems()
+			pushItems(EggDropdown, items)
+			Library:Notification({
+				Title = "Eggs",
+				Description = "Found eggs: " .. #items,
+				Duration = 3
+			})
 		end)
 	end
 })
 
-local EggsOptionsSection = EggsPage:Section({Name = "Options", Side = 2, Icon = "https://i.postimg.cc/cH8VsKQf/Bez-imeni-1.png"})
-
-EggsOptionsSection:Slider({
-	Name = "Open Delay",
-	Tooltip = "Pause between purchases. Lower = faster spam",
-	Flag = "EggDelay",
-	Min = 50,
-	Max = 3000,
-	Default = 300,
-	Suffix = " ms",
-	Decimals = 1
-})
-
-EggsOptionsSection:Toggle({
-	Name = "Teleport To Egg",
-	Tooltip = "Teleports you next to the selected egg if you are far from it",
-	Flag = "EggTeleport",
-	Default = false,
-	Callback = function(Value)
-		local tools = _G.EggTools
-		if tools then tools.AutoOpen.Teleport = Value and true or false end
-	end
-})
-
-EggsOptionsSection:Toggle({
-	Name = "Wait For Hatch Animation",
-	Tooltip = "Enable if the server rejects purchases while an egg is opening",
-	Flag = "EggWaitAnim",
-	Default = false,
-	Callback = function(Value)
-		local tools = _G.EggTools
-		if tools then tools.AutoOpen.WaitAnimation = Value and true or false end
-	end
-})
-
--- Подхват значения слайдера + автообновление списка яиц
+-- Статус и автообновление списка яиц
 task.spawn(function()
 	local last = table.concat(getEggItems(), "|")
+	local ticks = 0
 	while true do
-		task.wait(3)
+		task.wait(1)
+		ticks += 1
 		local tools = _G.EggTools
 		if tools then
-			local ms = tonumber(Library.Flags["EggDelay"]) or 300
-			tools.AutoOpen.Delay = math.max(0.05, ms / 1000)
-		end
-		local items = getEggItems()
-		local sig = table.concat(items, "|")
-		if sig ~= last then
-			last = sig
-			pushItems(EggDropdown, items)
+			local learned = tools.GetLearnedEgg()
+			local text = learned
+				and ("Remote learned (" .. tostring(learned) .. ")")
+				or "Remote NOT learned: open any egg manually once"
+			if tools.AutoOpen.Enabled then
+				text = text .. "\nOpened: " .. tostring(tools.AutoOpen.Opened)
+			end
+			pcall(function() EggInfo:SetText(text) end)
+
+			-- если авто-открытие остановилось само (ошибки) — снимаем переключатель
+			if not tools.AutoOpen.Enabled and Library.Flags["AutoOpenEggs"] then
+				pcall(function() AutoEggToggle:Set(false) end)
+			end
+
+			if ticks % 5 == 0 then
+				local items = getEggItems()
+				local sig = table.concat(items, "|")
+				if sig ~= last and #items > 0 then
+					last = sig
+					pushItems(EggDropdown, items)
+				end
+			end
 		end
 	end
 end)
+
+local EggSection = EggsPage:Section({ Name = "Egg Opener1", Side = 2 })
+
+local AutoOpenToggle = EggSection:Toggle({
+    Name = "Just Auto Open",
+	Tooltip = "AutoOpenLastEgg",
+    Flag = "AutoOpenLastEgg",
+    Default = false,
+    Callback = function(Value)
+        _G.AutoOpenLastEgg  = Value
+    end
+})
+
+local NoAnimToggle = EggSection:Toggle({
+	Name = "No Egg Animation",
+	Tooltip = "Opens eggs instantly, without the hatch animation",
+	Flag = "NoEggAnimation",
+	Default = false,
+	Callback = function(Value)
+		_G.NoEggAnimation = Value
+
+		if Value then
+			local tools = _G.EggTools
+			if not tools or not tools.IsNoAnimationReady then
+				Library:Notification({
+					Title = "Eggs",
+					Description = "EggsOpen.lua not loaded. Check console (F9)",
+					Duration = 4
+				})
+			elseif not tools.IsNoAnimationReady() then
+				Library:Notification({
+					Title = "Eggs",
+					Description = "Animation hook is not ready yet or failed. Check console (F9)",
+					Duration = 4
+				})
+			end
+		end
+	end
+})
+
+
+-------------------------Home Things-----------------------
+
+local AutoCat = Window:Category("Auto")
+local AutoPage = Window:Page({
+	Name = "Auto",
+	Icon = "https://i.postimg.cc/cH8VsKQf/Bez-imeni-1.png",
+	Category = AutoCat
+})
+
+local CraftSection = AutoPage:Section({ Name = "Crafting", Side = 1 })
+
+local CraftInfo = CraftSection:Paragraph({
+	Name = "Status",
+	Text = "Do one craft manually for each machine so the script learns the remote."
+})
+
+CraftSection:Divider()
+
+local AutoGoldenToggle = CraftSection:Toggle({
+	Name = "Auto Golden",
+	Tooltip = "Crafts golden pets in the Golden Machine (5-6 same pets)",
+	Flag = "AutoGoldenCraft",
+	Default = false,
+	Callback = function(Value)
+		_G.AutoGoldenCraft = Value
+	end
+})
+
+local AutoRainbowToggle = CraftSection:Toggle({
+	Name = "Auto Rainbow",
+	Tooltip = "Crafts rainbow pets in the Rainbow Machine (6 same golden pets)",
+	Flag = "AutoRainbowCraft",
+	Default = false,
+	Callback = function(Value)
+		_G.AutoRainbowCraft = Value
+	end
+})
+
+-- Статус Remote + синхронизация тогглов с переменными
+-- (переменные могут меняться клавишами Z / X внутри скриптов крафта)
+task.spawn(function()
+	local genv = (getgenv and getgenv()) or _G
+	while true do
+		task.wait(1)
+
+		local golden = genv.__AutoGolden
+		local rainbow = genv.__AutoRainbow
+		local text = "Golden: " .. ((golden and golden.remote) and "remote learned" or "NOT learned")
+			.. "\nRainbow: " .. ((rainbow and rainbow.remote) and "remote learned" or "NOT learned")
+		pcall(function() CraftInfo:SetText(text) end)
+
+		local g = _G.AutoGoldenCraft and true or false
+		if g ~= (Library.Flags["AutoGoldenCraft"] and true or false) then
+			pcall(function() AutoGoldenToggle:Set(g) end)
+		end
+
+		local r = _G.AutoRainbowCraft and true or false
+		if r ~= (Library.Flags["AutoRainbowCraft"] and true or false) then
+			pcall(function() AutoRainbowToggle:Set(r) end)
+		end
+	end
+end)
+
+local AutoRainbowToggle = CraftSection:Toggle({
+	Name = "Auto Index",
+	Tooltip = "Hatching, craftings pets for ur index",
+	Flag = "AutoIndex",
+	Default = false,
+	Callback = function(Value)
+		_G.AutoIndexFarm  = Value
+	end
+})
+
 
 -------------------------Misc-----------------------
 
@@ -453,16 +613,61 @@ local MiscSection = MiscPage:Section({Name = "Misc", Side = 1, Icon = "https://i
 MiscSection:Button({
     Name = "Anti Afk",
     Callback = function()
-        loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/Evade/refs/heads/main/Things/Misc/AntiAfk.lua'))()
+        loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Misc/AntiAfk.lua'))()
     end
 })
 
-MiscSection:Button({
-    Name = "Anti Lag",
-    Callback = function()
-        loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/Evade/refs/heads/main/Things/Misc/AntiLag.lua'))()
+local AntiLagToggle = MiscSection:Toggle({
+    Name = "AntiLag1",
+	Tooltip = "AntiLag1",
+    Flag = "AntiLag1",
+    Default = false,
+    Callback = function(Value)
+        _G.AntiLagEnabled = Value
     end
 })
+
+local AntiLagToggle = MiscSection:Toggle({
+    Name = "AntiLag2",
+	Tooltip = "AntiLag2",
+    Flag = "AntiLag2",
+    Default = false,
+    Callback = function(Value)
+        _G.AntiLag2Enabled = Value
+    end
+})
+
+local AntiLagToggle = MiscSection:Toggle({
+    Name = "AntiLag3",
+	Tooltip = "AntiLag3",
+    Flag = "AntiLag3",
+    Default = false,
+    Callback = function(Value)
+        _G.AntiLag3Enabled = Value
+    end
+})
+
+local AntiLagToggle = MiscSection:Toggle({
+    Name = "AntiLag4",
+	Tooltip = "AntiLag4",
+    Flag = "AntiLag4",
+    Default = false,
+    Callback = function(Value)
+        _G.AntiLag4Enabled = Value
+    end
+})
+
+local Disable3dRenderToggle = MiscSection:Toggle({
+    Name = "Disable 3d Render",
+	Tooltip = "Disables world rendering. FPS boost",
+    Flag = "Disable3d",
+    Default = false,
+    Callback = function(Value)
+       local RunService = game:GetService("RunService")
+        RunService:Set3dRenderingEnabled(not Value)
+    end
+})
+
 
 MiscSection:Button({
     Name = "Remote Spy",
@@ -505,6 +710,47 @@ MiscSection:Button({
         end
     end
 })
+
+-------------------------Custom-----------------------
+
+local CustomCat = Window:Category("Custom")
+local CustomPage = Window:Page({
+	Name = "Custom",
+	Icon = "https://i.postimg.cc/CxnfNm71/Bez-imeni-1.png",
+	Category = CustomCat
+})
+
+local CustomSection = CustomPage:Section({ Name = "Teams", Side = 1 })
+
+CustomSection:Paragraph({
+	Name = "Pet Teams",
+	Text = "Shows the Teams star in your inventory (bottom bar). Turn off to hide it completely."
+})
+
+CustomSection:Divider()
+
+local TeamsToggle = CustomSection:Toggle({
+	Name = "Teams",
+	Tooltip = "Enable / disable Pet Teams in the inventory",
+	Flag = "TeamsEnabled",
+	Default = false,
+	Callback = function(Value)
+		local genv = (getgenv and getgenv()) or _G
+		genv.TeamsEnabled = Value and true or false
+	end
+})
+
+-- Синхронизация: если переменную поменяли из консоли - тоггл тоже переключится
+task.spawn(function()
+	local genv = (getgenv and getgenv()) or _G
+	while true do
+		task.wait(1)
+		local t = genv.TeamsEnabled == true
+		if t ~= (Library.Flags["TeamsEnabled"] and true or false) then
+			pcall(function() TeamsToggle:Set(t) end)
+		end
+	end
+end)
 
 local SettingsCat = Window:Category("Settings")
 
