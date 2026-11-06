@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------
+--------------------------------------------------------------------------------222
 -- КОНФИГ
 --------------------------------------------------------------------------------
 local CONFIG = {
@@ -485,12 +485,23 @@ function EggTools.GetAllEggs()
 	local out = {}
 	if not (dir and dir.Eggs) then return out end
 	local cw = curWorld()
+	-- доступ проверяем один раз на мир / область (а не на каждое яйцо)
+	local worldOk, areaOk = {}, {}
+	-- если проверку сделать не удалось (ошибка) — яйцо НЕ скрываем
+	local function allowed(cache, fn, key)
+		local v = cache[key]
+		if v == nil then
+			local ok, res = pcall(fn, key)
+			v = (not ok) or (res ~= false and res ~= nil)
+			cache[key] = v
+		end
+		return v
+	end
 	for name in pairs(dir.Eggs) do
-		local info = eggInfo(name)
-		if info then
-			local okAccess, access = pcall(L.WorldCmds.HasAccess, info.world)
-			local okArea, hasArea = pcall(L.WorldCmds.HasArea, info.area)
-			if okAccess and access and okArea and hasArea then
+		if type(name) == "string" then
+			local info = eggInfo(name)
+			if info and allowed(worldOk, L.WorldCmds.HasAccess, info.world)
+				and allowed(areaOk, L.WorldCmds.HasArea, info.area) then
 				out[#out + 1] = { name = name, area = info.area, world = info.world, here = (info.world == cw) }
 			end
 		end
