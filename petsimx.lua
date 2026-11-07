@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----вф
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----вфв
 local CheatName = "Evade"
 
 local Players = game:GetService("Players")
@@ -216,7 +216,9 @@ if DEBUG then
 end
 
 -- ===== ВЫБОР ТИПОВ МОНЕТ =====
--- Ничего не выбрано = ломаем все типы. В скобках категория из игры: coin, chest, safe, vault, luckyblock...
+-- Типы без привязки к локации. "ALL: chest" = все сундуки/ящики любой локации, "Crate [chest]" = только Crate.
+-- Локации выбираются отдельным списком выше: фарм = выбранные типы в выбранных локациях.
+-- Ничего не выбрано = ломаем все типы.
 do
 	local tools = _G.PetTools
 	if not (tools and tools.CoinManager and tools.CoinManager.GetCoinTypes) then
@@ -231,7 +233,7 @@ end
 
 local CoinTypeDropdown = AutoFarmSection:Dropdown({
 	Name = "Coin Types",
-	Tooltip = "Choose which coin types to break (nothing selected = all)",
+	Tooltip = "Types to break in the selected locations: ALL: coin / chest / safe / vault, or a single type (nothing selected = all)",
 	Flag = "FarmCoinTypes",
 	Items = getTypeItems(),
 	Multi = true,
