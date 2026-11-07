@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----лн
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----вфв
 local CheatName = "Evade"
 
 local Players = game:GetService("Players")
@@ -119,6 +119,23 @@ local function pushItems(dropdown, items)
 	return false
 end
 
+-- После любой смены настроек фарма мягко перезапускаем его (как выкл/вкл чекбокса).
+-- Дебаунс: пока двигаешь слайдер, перезапуск откладывается, сработает один раз после паузы.
+local restartToken = 0
+local function applyFarm()
+	local tools = _G.PetTools
+	if not (tools and tools.AutoFarm and tools.AutoFarm.Enabled) then return end
+	restartToken += 1
+	local my = restartToken
+	task.delay(0.5, function()
+		if my ~= restartToken then return end
+		local t = _G.PetTools
+		if t and t.AutoFarm and t.AutoFarm.Enabled and t.AutoFarm.Restart then
+			pcall(t.AutoFarm.Restart)
+		end
+	end)
+end
+
 -------------------------Event-----------------------
 
 local AutoFarmCat = Window:Category("Event")
@@ -207,6 +224,7 @@ local LocationDropdown = AutoFarmSection:Dropdown({
 		local tools = _G.PetTools
 		if tools and tools.AutoFarm.Enabled and #selectedLocations > 0 then
 			tools.AutoFarm.Location = selectedLocations
+			applyFarm()
 		end
 	end
 })
@@ -243,6 +261,7 @@ local CoinTypeDropdown = AutoFarmSection:Dropdown({
 		local tools = _G.PetTools
 		if tools and tools.AutoFarm and tools.AutoFarm.SetCoinTypes then
 			tools.AutoFarm.SetCoinTypes(list)
+			applyFarm()
 		end
 	end
 })
@@ -337,6 +356,7 @@ end
 local function setCfg(key, value)
 	local cfg = farmCfg()
 	if cfg then cfg[key] = value end
+	applyFarm()
 end
 
 local function cfgDefault(key, fallback)
@@ -346,6 +366,27 @@ local function cfgDefault(key, fallback)
 	return v
 end
 
+-- сколько петов сейчас экипировано (ждём, пока они появятся в Workspace.__THINGS.Pets)
+local function getPetCount()
+	local tools = _G.PetTools
+	if tools and tools.GetPetCount then
+		local ok, n = pcall(tools.GetPetCount)
+		if ok and type(n) == "number" then return n end
+	end
+	return 0
+end
+
+do
+	local waited = 0
+	while getPetCount() == 0 and waited < 5 do
+		task.wait(0.5)
+		waited += 0.5
+	end
+end
+-- максимум слайдеров = число петов на старте (минимум 2, чтобы слайдер не вырождался)
+local PetCountAtStart = math.max(getPetCount(), 2)
+dprint("петов экипировано:", getPetCount())
+
 local FarmSettings = EventPage:Section({
 	Name = "Farm Settings",
 	Description = "Pets count and speed (applies instantly)",
@@ -353,14 +394,37 @@ local FarmSettings = EventPage:Section({
 	Icon = "https://i.postimg.cc/tCDF4BRx/Bez-imeni-1.png"
 })
 
+local PetsInfo = FarmSettings:Paragraph({
+	Name = "Your pets",
+	Text = "Equipped pets: " .. getPetCount()
+})
+
+task.spawn(function()
+	local last = ""
+	while true do
+		task.wait(1)
+		local n = getPetCount()
+		local cfg = farmCfg()
+		local want = cfg and math.floor(tonumber(cfg.PetsPerCoin) or 1) or 1
+		local per = math.min(n, math.max(1, want))
+		local text = "Equipped pets: " .. n .. "\nPets per coin now: " .. per
+		if text ~= last then
+			last = text
+			pcall(function() PetsInfo:SetText(text) end)
+		end
+	end
+end)
+
+FarmSettings:Divider()
+
 -- Сколько петов
 FarmSettings:Slider({
 	Name = "Pets per coin",
-	Tooltip = "How many pets go to each coin at first. 1 = every pet takes its own coin",
+	Tooltip = "How many pets go to each coin at first (max = your equipped pets). 1 = every pet takes its own coin",
 	Flag = "FarmPetsPerCoin",
 	Min = 1,
-	Max = 20,
-	Default = math.clamp(cfgDefault("PetsPerCoin", 1), 1, 20),
+	Max = PetCountAtStart,
+	Default = math.clamp(cfgDefault("PetsPerCoin", 1), 1, PetCountAtStart),
 	Decimals = 1,
 	Callback = function(Value)
 		setCfg("PetsPerCoin", math.floor(Value))
@@ -382,8 +446,8 @@ FarmSettings:Slider({
 	Tooltip = "Limit for extra pets on a single coin",
 	Flag = "FarmMaxPetsPerCoin",
 	Min = 1,
-	Max = 100,
-	Default = math.clamp(cfgDefault("MaxPetsPerCoin", 100), 1, 100),
+	Max = PetCountAtStart,
+	Default = math.clamp(cfgDefault("MaxPetsPerCoin", 100), 1, PetCountAtStart),
 	Decimals = 1,
 	Callback = function(Value)
 		setCfg("MaxPetsPerCoin", math.floor(Value))
