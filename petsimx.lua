@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----вфв
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----лн
 local CheatName = "Evade"
 
 local Players = game:GetService("Players")
@@ -326,6 +326,155 @@ local StatsToggle = CollectSection:Toggle({
 })
 
 
+
+-- ===== НАСТРОЙКИ ФАРМА ПЕТАМИ =====
+-- Всё пишется прямо в _G.PetTools.Config (его читает AutoFarm.lua), так что работает и во время фарма.
+local function farmCfg()
+	local tools = _G.PetTools
+	return tools and tools.Config
+end
+
+local function setCfg(key, value)
+	local cfg = farmCfg()
+	if cfg then cfg[key] = value end
+end
+
+local function cfgDefault(key, fallback)
+	local cfg = farmCfg()
+	local v = cfg and cfg[key]
+	if v == nil then return fallback end
+	return v
+end
+
+local FarmSettings = EventPage:Section({
+	Name = "Farm Settings",
+	Description = "Pets count and speed (applies instantly)",
+	Side = 2,
+	Icon = "https://i.postimg.cc/tCDF4BRx/Bez-imeni-1.png"
+})
+
+-- Сколько петов
+FarmSettings:Slider({
+	Name = "Pets per coin",
+	Tooltip = "How many pets go to each coin at first. 1 = every pet takes its own coin",
+	Flag = "FarmPetsPerCoin",
+	Min = 1,
+	Max = 20,
+	Default = math.clamp(cfgDefault("PetsPerCoin", 1), 1, 20),
+	Decimals = 1,
+	Callback = function(Value)
+		setCfg("PetsPerCoin", math.floor(Value))
+	end
+})
+
+FarmSettings:Toggle({
+	Name = "Send extra pets",
+	Tooltip = "Free pets (when coins are fewer than pets) join already taken coins instead of standing idle",
+	Flag = "FarmJoinExtra",
+	Default = cfgDefault("JoinExtraPets", true) and true or false,
+	Callback = function(Value)
+		setCfg("JoinExtraPets", Value and true or false)
+	end
+})
+
+FarmSettings:Slider({
+	Name = "Max pets per coin",
+	Tooltip = "Limit for extra pets on a single coin",
+	Flag = "FarmMaxPetsPerCoin",
+	Min = 1,
+	Max = 100,
+	Default = math.clamp(cfgDefault("MaxPetsPerCoin", 100), 1, 100),
+	Decimals = 1,
+	Callback = function(Value)
+		setCfg("MaxPetsPerCoin", math.floor(Value))
+	end
+})
+
+FarmSettings:Divider()
+
+-- Скорость
+local HitSlider, LoopSlider, DelaySlider, MaxHitsSlider
+
+local SPEED_PRESETS = {
+	Slow   = { HitInterval = 0.5,  LoopInterval = 0.5,  SendDelay = 0.05, MaxHitsPerTick = 30  },
+	Normal = { HitInterval = 0.2,  LoopInterval = 0.2,  SendDelay = 0.02, MaxHitsPerTick = 100 },
+	Fast   = { HitInterval = 0.1,  LoopInterval = 0.1,  SendDelay = 0.01, MaxHitsPerTick = 150 },
+	Turbo  = { HitInterval = 0.05, LoopInterval = 0.05, SendDelay = 0,    MaxHitsPerTick = 200 },
+}
+
+FarmSettings:Dropdown({
+	Name = "Speed preset",
+	Tooltip = "Quick speed profile. You can fine-tune below. Turbo may get you rate limited",
+	Flag = "FarmSpeedPreset",
+	Items = { "Slow", "Normal", "Fast", "Turbo" },
+	Default = "Normal",
+	Multi = false,
+	Callback = function(Value)
+		local preset = SPEED_PRESETS[normalize(Value)[1] or ""]
+		if not preset then return end
+		for key, val in pairs(preset) do setCfg(key, val) end
+		-- двигаем слайдеры под пресет
+		pcall(function() HitSlider:Set(preset.HitInterval) end)
+		pcall(function() LoopSlider:Set(preset.LoopInterval) end)
+		pcall(function() DelaySlider:Set(preset.SendDelay) end)
+		pcall(function() MaxHitsSlider:Set(preset.MaxHitsPerTick) end)
+	end
+})
+
+HitSlider = FarmSettings:Slider({
+	Name = "Hit interval",
+	Tooltip = "Pause between pet hits. Lower = faster breaking",
+	Flag = "FarmHitInterval",
+	Min = 0.05,
+	Max = 1,
+	Default = math.clamp(cfgDefault("HitInterval", 0.2), 0.05, 1),
+	Decimals = 0.05,
+	Suffix = " s",
+	Callback = function(Value)
+		setCfg("HitInterval", Value)
+	end
+})
+
+LoopSlider = FarmSettings:Slider({
+	Name = "Assign interval",
+	Tooltip = "How often pets are re-assigned to coins. Lower = pets switch to new coins faster",
+	Flag = "FarmLoopInterval",
+	Min = 0.05,
+	Max = 1,
+	Default = math.clamp(cfgDefault("LoopInterval", 0.2), 0.05, 1),
+	Decimals = 0.05,
+	Suffix = " s",
+	Callback = function(Value)
+		setCfg("LoopInterval", Value)
+	end
+})
+
+DelaySlider = FarmSettings:Slider({
+	Name = "Send delay",
+	Tooltip = "Delay between sending pets to different coins. 0 = all at once",
+	Flag = "FarmSendDelay",
+	Min = 0,
+	Max = 0.2,
+	Default = math.clamp(cfgDefault("SendDelay", 0.02), 0, 0.2),
+	Decimals = 0.01,
+	Suffix = " s",
+	Callback = function(Value)
+		setCfg("SendDelay", Value)
+	end
+})
+
+MaxHitsSlider = FarmSettings:Slider({
+	Name = "Max hits per tick",
+	Tooltip = "Cap on hit requests per tick. Lower it if the game lags or kicks you",
+	Flag = "FarmMaxHitsPerTick",
+	Min = 10,
+	Max = 300,
+	Default = math.clamp(cfgDefault("MaxHitsPerTick", 100), 10, 300),
+	Decimals = 1,
+	Callback = function(Value)
+		setCfg("MaxHitsPerTick", math.floor(Value))
+	end
+})
 
 -------------------------Eggs-----------------------
 -- Логика лежит в Eggs/EggsOpen.lua (он создаёт _G.EggTools при загрузке)
