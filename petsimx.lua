@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----www
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----вф
 local CheatName = "Evade"
 
 local Players = game:GetService("Players")
@@ -666,24 +666,6 @@ EggSection:Toggle({
 	Callback = function(Value)
 		local tools = _G.EggTools
 		if tools then tools.SetAfk(Value) end
-	end
-})
-
-EggSection:Slider({
-	Name = "AFK arrive wait",
-	Tooltip = "AFK + TP: pause at the egg before buying. Lower = faster. Raises itself automatically if the server rejects purchases",
-	Flag = "EggAfkArrive",
-	Min = 0.02,
-	Max = 0.5,
-	Default = 0.05,
-	Decimals = 0.01,
-	Suffix = " s",
-	Callback = function(Value)
-		local tools = _G.EggTools
-		if tools and tools.Config then
-			tools.Config.AfkArriveWait = Value
-			if tools.ResetAfkTuning then tools.ResetAfkTuning() end
-		end
 	end
 })
 
