@@ -12,7 +12,7 @@
     RenderFidelity скрипт не трогает вообще (из-за ошибки "Cannot change SolidModel RenderFidelity").
 ]]
 
-local FLAG = "AntiLagEnabled"
+local FLAG = "AntiLagEnabled1"
 
 local CLEANUP = FLAG .. "_Cleanup"
 if _G[CLEANUP] then
