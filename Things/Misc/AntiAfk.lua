@@ -270,7 +270,6 @@ task.spawn(function()
         handle(obj)
         if i % CFG.BATCH == 0 then RunService.Heartbeat:Wait() end
     end
-    print(("Анти-лаг: первичная очистка завершена (%d объектов)"):format(#list))
 end)
 
 -- Новые объекты (с очередью, чтобы не лагало при массовом спавне)
@@ -305,5 +304,3 @@ if CFG.HIDE_COINS and coinsFolder then
         end
     end)
 end
-
-print("Анти-лаг включён (безопасный режим: парты и папки не удаляются)")
