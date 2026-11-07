@@ -1,15 +1,15 @@
---------------------------------------------------------------------------------вф
--- КОНФИГ
+--------------------------------------------------------------------------------
+-- CONFIG
 --------------------------------------------------------------------------------
 local CONFIG = {
-	TeleportDistance = 10, -- если включён телепорт и ты дальше этого от яйца, телепортируемся к нему
-	MaxFailures      = 5,  -- столько неудач подряд -> автооткрытие останавливается
-	FailDelay        = 1,  -- пауза после неудачной покупки
-	RescanInterval   = 15, -- как часто пересканировать яйца на карте
+	TeleportDistance = 10, -- if teleport is on and you are farther than this from the egg, teleport to it
+	MaxFailures      = 5,  -- this many failures in a row -> auto-open stops
+	FailDelay        = 1,  -- pause after a failed purchase
+	RescanInterval   = 15, -- how often to rescan eggs on the map
 }
 
 --------------------------------------------------------------------------------
--- СЕРВИСЫ И УТИЛИТЫ
+-- SERVICES AND UTILITIES
 --------------------------------------------------------------------------------
 local env = (getgenv and getgenv()) or _G
 local Players = game:GetService("Players")
@@ -18,7 +18,7 @@ local Workspace = game:GetService("Workspace")
 local StarterGui = game:GetService("StarterGui")
 local LocalPlayer = Players.LocalPlayer
 
--- Повторный запуск: останавливаем старую версию
+-- Re-run: stop the old version
 if _G.EggTools and _G.EggTools.AutoOpen then
 	pcall(_G.EggTools.AutoOpen.Stop)
 end
@@ -37,11 +37,11 @@ local function getRoot()
 end
 
 --------------------------------------------------------------------------------
--- 0. ПЕРЕХВАТ РЕАЛЬНОГО ВЫЗОВА ПОКУПКИ
--- Ремоуты зашифрованы, поэтому ждём, пока ты откроешь яйцо вручную один раз.
--- Хук запоминает ремоут, метод и аргументы. Дальше мы повторяем этот вызов,
--- подставляя своё яйцо и количество.
--- Данные лежат в env, поэтому переживают перезапуск скрипта.
+-- 0. CAPTURING THE REAL PURCHASE CALL
+-- Remotes are encrypted, so we wait until you open an egg manually once.
+-- The hook remembers the remote, the method and the arguments. After that we repeat
+-- this call, substituting our own egg and amount.
+-- The data is stored in env, so it survives a script restart.
 --------------------------------------------------------------------------------
 local Captured = env.__EggCapturedV2
 if not Captured then
@@ -49,14 +49,14 @@ if not Captured then
 	env.__EggCapturedV2 = Captured
 end
 
--- глушим хук старой версии скрипта (он вызывал эту функцию)
+-- disable the hook of the old script version (it used to call this function)
 env.__EggIsEgg = nil
 
 local Lib, Net
 local eggCache = {} -- [eggId] = { inst, ... }
 
--- Простая таблица-набор названий яиц. Хук только ЧИТАЕТ её и не вызывает
--- никаких функций, чтобы не ломать игровые скрипты.
+-- A simple set table of egg names. The hook only READS it and doesn't call
+-- any functions, so it doesn't break the game's scripts.
 local EggNames = {}
 env.__EggNamesV2 = EggNames
 
@@ -99,7 +99,7 @@ if not env.__EggHookV2 then
 end
 
 --------------------------------------------------------------------------------
--- 1. БИБЛИОТЕКА ИГРЫ И Network.Invoke (запасной вариант)
+-- 1. GAME LIBRARY AND Network.Invoke (fallback)
 --------------------------------------------------------------------------------
 local function getLib()
 	if Lib then return Lib end
@@ -120,7 +120,7 @@ local function pickNetwork(m)
 	return nil
 end
 
--- вызывается только если ремоут не пойман, при старте ничего не require-им
+-- only called if the remote hasn't been captured, nothing is required at startup
 local function resolveNetwork()
 	if Net then return Net end
 	Net = pickNetwork(getLib())
@@ -142,7 +142,7 @@ local function isOpening()
 end
 
 --------------------------------------------------------------------------------
--- 2. ПОИСК ЯИЦ НА КАРТЕ
+-- 2. FINDING EGGS ON THE MAP
 --------------------------------------------------------------------------------
 local function scanEggs()
 	local found = {}
@@ -189,7 +189,7 @@ local function nearestEgg(eggId)
 end
 
 --------------------------------------------------------------------------------
--- 3. ОТКРЫТИЕ ЯИЦ
+-- 3. OPENING EGGS
 --------------------------------------------------------------------------------
 local EggTools = {}
 
@@ -209,7 +209,7 @@ function EggTools.GetEggNames()
 	return names
 end
 
--- Пойман ли ремоут (true/false) и с каким яйцом
+-- Whether the remote has been captured (true/false) and with which egg
 function EggTools.IsLearned()
 	return Captured.remote ~= nil and Captured.args ~= nil
 end
@@ -218,8 +218,8 @@ function EggTools.GetLearnedEgg()
 	return Captured.args and Captured.args[1] or nil
 end
 
--- Собираем аргументы из пойманного шаблона:
--- [1] = яйцо, а если дальше идут два boolean — это triple и octuple
+-- Build arguments from the captured template:
+-- [1] = egg, and if two booleans follow - they are triple and octuple
 local function buildArgs(eggId, amount)
 	local src = Captured.args
 	local args = table.pack(table.unpack(src, 1, src.n))
@@ -231,14 +231,14 @@ local function buildArgs(eggId, amount)
 	return args
 end
 
--- Один вызов покупки. amount: 1, 3 или 8. Возвращает success, message
+-- One purchase call. amount: 1, 3 or 8. Returns success, message
 function EggTools.OpenOnce(eggId, amount)
 	if type(eggId) ~= "string" or eggId == "" then
 		return false, "Egg not selected"
 	end
 	amount = tonumber(amount) or 1
 
-	-- основной путь: повторяем пойманный вызов
+	-- main path: repeat the captured call
 	if Captured.remote and Captured.args then
 		local args = buildArgs(eggId, amount)
 		local remote, method = Captured.remote, Captured.method
@@ -254,7 +254,7 @@ function EggTools.OpenOnce(eggId, amount)
 		return true, res[3]
 	end
 
-	-- запасной путь: игровой Network.Invoke
+	-- fallback path: the game's Network.Invoke
 	local net = resolveNetwork()
 	if not net then
 		return false, "Remote not learned: open any egg manually once"
@@ -279,7 +279,7 @@ function AutoOpen.Start(eggId, amount)
 	if AutoOpen.Enabled then return end
 	if eggId then AutoOpen.Egg = eggId end
 	if amount then AutoOpen.Amount = tonumber(amount) or 1 end
-	-- если яйцо не выбрано — берём то, что открывали вручную
+	-- if no egg is selected - take the one that was opened manually
 	if not AutoOpen.Egg then AutoOpen.Egg = EggTools.GetLearnedEgg() end
 	if not AutoOpen.Egg then
 		return
@@ -321,10 +321,9 @@ function AutoOpen.Start(eggId, amount)
 				task.wait(math.max(0.05, AutoOpen.Delay))
 			else
 				fails = fails + 1
-				local text = tostring(msg)
 				if fails >= CONFIG.MaxFailures then
 					AutoOpen.Enabled = false
-					notify("Stopped: " .. text)
+					notify("Stopped: " .. tostring(msg))
 					break
 				end
 				task.wait(CONFIG.FailDelay)
@@ -341,11 +340,11 @@ EggTools.AutoOpen = AutoOpen
 _G.EggTools = EggTools
 
 --------------------------------------------------------------------------------
--- 4. ОТКЛЮЧЕНИЕ АНИМАЦИИ ОТКРЫТИЯ ЯИЦ
--- Управление переменной:
---   _G.NoEggAnimation = true   -- анимации нет (яйца открываются мгновенно)
---   _G.NoEggAnimation = false  -- обычная анимация
--- Подмена ставится один раз, дальше переменную можно менять сколько угодно.
+-- 4. DISABLING THE EGG OPENING ANIMATION
+-- Controlled by a variable:
+--   _G.NoEggAnimation = true   -- no animation (eggs open instantly)
+--   _G.NoEggAnimation = false  -- normal animation
+-- The replacement is installed once, after that the variable can be changed freely.
 --------------------------------------------------------------------------------
 if _G.NoEggAnimation == nil then
 	_G.NoEggAnimation = false
@@ -353,7 +352,7 @@ end
 
 local NoAnim = { Method = nil, Installed = false }
 
--- Мгновенная замена OpenEgg: те же сигналы и счётчик, но без анимации
+-- Instant replacement of OpenEgg: same signals and counter, but no animation
 local function InstantOpen(eggName, pets)
 	local vars = Lib.Variables
 
@@ -365,7 +364,7 @@ local function InstantOpen(eggName, pets)
 	vars.OpeningEgg = vars.OpeningEgg + 1
 	Lib.Signal.Fire("Opening Egg", eggName)
 
-	game:GetService("RunService").Heartbeat:Wait() -- кадр, чтобы остальные скрипты успели среагировать
+	game:GetService("RunService").Heartbeat:Wait() -- one frame so other scripts can react
 
 	vars.OpeningEgg = math.max(vars.OpeningEgg - 1, 0)
 	Lib.Signal.Fire("Done Opening Egg", eggName)
@@ -378,7 +377,7 @@ local function installNoAnim()
 		return
 	end
 
-	-- ждём загрузку игровой библиотеки
+	-- wait for the game library to load
 	local waited = 0
 	while not getLib() and waited < 20 do
 		task.wait(0.5)
@@ -410,7 +409,7 @@ local function installNoAnim()
 	end
 
 	local target
-	for _ = 1, 20 do -- ждём до ~10 сек, вдруг игра ещё грузится
+	for _ = 1, 20 do -- wait up to ~10 sec in case the game is still loading
 		target = findOpenEgg()
 		if target then break end
 		task.wait(0.5)
@@ -418,8 +417,8 @@ local function installNoAnim()
 
 	local method
 
-	-- Способ 1: подмена функции. Обёртка сама смотрит на переменную:
-	-- включено -> мгновенная версия, выключено -> оригинал.
+	-- Method 1: function replacement. The wrapper checks the variable itself:
+	-- on -> instant version, off -> original.
 	if target and hookfunction then
 		local old
 		local ok = pcall(function()
@@ -433,7 +432,7 @@ local function installNoAnim()
 		if ok and old then method = "hookfunction" end
 	end
 
-	-- Способ 2 (запасной): подписки игры выключаются/включаются по переменной
+	-- Method 2 (fallback): the game's subscriptions are disabled/enabled by the variable
 	if not method and getconnections then
 		local ok = pcall(function()
 			local sources = {
@@ -468,7 +467,7 @@ local function installNoAnim()
 					end
 					task.wait(0.2)
 				end
-				-- скрипт перезапущен: возвращаем оригинальные подписки
+				-- script was restarted: restore the original subscriptions
 				for _, c in ipairs(original) do pcall(function() c:Enable() end) end
 			end)
 		end)
@@ -494,7 +493,7 @@ task.spawn(installNoAnim)
 
 task.spawn(function()
 	while _G.EggToolsGen == myGen do
-		local ok, err = pcall(function()
+		pcall(function()
 			scanEggs()
 			getLib()
 			rebuildNames()
