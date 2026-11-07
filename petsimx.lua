@@ -659,6 +659,31 @@ EggSection:Toggle({
 })
 
 EggSection:Toggle({
+	Name = "AFK + TP",
+	Tooltip = "Stay at your saved spot; hop to the egg only to buy, then return and wait for the cooldown",
+	Flag = "EggAfkTp",
+	Default = false,
+	Callback = function(Value)
+		local tools = _G.EggTools
+		if tools then tools.AutoOpen.Afk = Value end
+	end
+})
+
+EggSection:Button({
+	Name = "Set AFK spot here",
+	Tooltip = "Saves your current position as the spot to return to",
+	Callback = function()
+		local tools = _G.EggTools
+		local ok = tools and tools.SetHome()
+		Library:Notification({
+			Title = "Eggs",
+			Description = ok and "AFK spot saved" or "Character not ready",
+			Duration = 3
+		})
+	end
+})
+
+EggSection:Toggle({
 	Name = "Wait animation",
 	Tooltip = "Waits for the opening animation before the next purchase",
 	Flag = "EggWaitAnim",
@@ -703,6 +728,7 @@ AutoEggToggle = EggSection:Toggle({
 			auto.Amount = selectedAmount
 			auto.Delay = Library.Flags["EggDelay"] or auto.Delay
 			auto.Teleport = Library.Flags["EggTeleport"] and true or false
+			auto.Afk = Library.Flags["EggAfkTp"] and true or false
 			auto.WaitAnimation = Library.Flags["EggWaitAnim"] and true or false
 			auto.Start(egg, selectedAmount)
 		else
