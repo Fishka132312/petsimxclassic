@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----www
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----ыыы
 local CheatName = "Evade"
 
 local Players = game:GetService("Players")
@@ -268,6 +268,25 @@ local CoinTypeDropdown = AutoFarmSection:Dropdown({
 })
 
 dprint("Coin Types items:", table.concat(getTypeItems(), ", "))
+
+-- Размер сундуков: работает только для группы Chests (остальные группы не трогает).
+-- Ничего не выбрано = все размеры.
+local ChestSizeDropdown = AutoFarmSection:Dropdown({
+	Name = "Chest Size",
+	Tooltip = "Which chests to break: Small, Medium, Large (nothing selected = all sizes). Affects only the Chests group",
+	Flag = "FarmChestSizes",
+	Items = { "Small", "Medium", "Large" },
+	Multi = true,
+	Callback = function(Value)
+		local list = normalize(Value)
+		dprint("размер сундуков:", table.concat(list, ", "))
+		local tools = _G.PetTools
+		if tools and tools.AutoFarm and tools.AutoFarm.SetChestSizes then
+			tools.AutoFarm.SetChestSizes(list)
+			applyFarm()
+		end
+	end
+})
 
 -- Автообновление списка групп (например, когда на карте появились Presents).
 -- Выбор запоминаем и возвращаем обратно после обновления списка.
