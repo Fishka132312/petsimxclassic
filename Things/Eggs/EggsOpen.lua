@@ -6,6 +6,7 @@ local CONFIG = {
 	MaxFailures      = 5,  -- this many failures in a row -> auto-open stops
 	FailDelay        = 1,  -- pause after a failed purchase
 	RescanInterval   = 15, -- how often to rescan eggs on the map
+	AfkArriveWait    = 0.08, -- AFK+TP: pause after teleporting to the egg so the server sees the new position
 }
 
 --------------------------------------------------------------------------------
@@ -271,9 +272,63 @@ local AutoOpen = {
 	Delay = 0.3,
 	Teleport = false,
 	WaitAnimation = false,
+	Afk = false,      -- AFK+TP: stand at Home, hop to the egg only for the purchase
+	Home = nil,       -- CFrame of the spot to return to
 	Opened = 0,
 	Token = nil,
 }
+
+-- Remember the current position as the AFK spot
+function EggTools.SetHome()
+	local r = getRoot()
+	if r then
+		AutoOpen.Home = r.CFrame
+		return true
+	end
+	return false
+end
+
+-- Remember the position at script launch (wait for the character if needed)
+task.spawn(function()
+	local t = 0
+	while not getRoot() and t < 15 do
+		task.wait(0.25)
+		t += 0.25
+	end
+	if not AutoOpen.Home then EggTools.SetHome() end
+end)
+
+-- One AFK cycle: teleport to the egg -> buy -> teleport back to Home
+local function afkOpenOnce(eggId, amount)
+	local home = AutoOpen.Home
+	if not home then
+		EggTools.SetHome()
+		home = AutoOpen.Home
+	end
+	local rootPart = getRoot()
+	if not (home and rootPart) then
+		return false, "Character not ready"
+	end
+	local egg, center = nearestEgg(eggId)
+	if not (egg and center) then
+		return false, "Egg not found on the map"
+	end
+
+	rootPart.CFrame = CFrame.new(center.Position + Vector3.new(0, 3, 6))
+	task.wait(CONFIG.AfkArriveWait)
+
+	local okCall, ok, msg = pcall(EggTools.OpenOnce, eggId, amount)
+
+	-- always go back, even if the purchase failed
+	local r = getRoot()
+	if r then
+		r.CFrame = home
+		pcall(function() r.AssemblyLinearVelocity = Vector3.zero end)
+	end
+
+	if not okCall then return false, tostring(ok) end
+	return ok, msg
+end
 
 function AutoOpen.Start(eggId, amount)
 	if AutoOpen.Enabled then return end
@@ -295,7 +350,7 @@ function AutoOpen.Start(eggId, amount)
 		while AutoOpen.Enabled and AutoOpen.Token == token do
 			local id = AutoOpen.Egg
 
-			if AutoOpen.Teleport then
+			if AutoOpen.Teleport and not AutoOpen.Afk then
 				local egg, center, dist = nearestEgg(id)
 				if egg and center and dist and dist > CONFIG.TeleportDistance then
 					local rootPart = getRoot()
@@ -314,7 +369,12 @@ function AutoOpen.Start(eggId, amount)
 			end
 
 			local amountNow = AutoOpen.Amount
-			local ok, msg = EggTools.OpenOnce(id, amountNow)
+			local ok, msg
+			if AutoOpen.Afk then
+				ok, msg = afkOpenOnce(id, amountNow)
+			else
+				ok, msg = EggTools.OpenOnce(id, amountNow)
+			end
 			if ok then
 				fails = 0
 				AutoOpen.Opened = AutoOpen.Opened + (tonumber(amountNow) or 1)
