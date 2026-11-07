@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------уцуй
+--------------------------------------------------------------------------------вф
 -- CONFIG
 --------------------------------------------------------------------------------
 local CONFIG = {
@@ -6,12 +6,10 @@ local CONFIG = {
 	MaxFailures      = 5,  -- this many failures in a row -> auto-open stops
 	FailDelay        = 1,  -- pause after a failed purchase
 	RescanInterval   = 15, -- how often to rescan eggs on the map
-	AfkArriveWait    = 0.05, -- AFK+TP: starting pause at the egg before the first purchase (auto-raises itself if the server rejects it)
-	AfkArriveMax     = 0.35, -- AFK+TP: ceiling for that auto-tuned pause
 	AfkAttempts      = 8,    -- AFK+TP: how many purchase attempts at the egg before giving up and going back
 	AfkRetryWait     = 0.05, -- AFK+TP: pause between attempts at the egg
 	AfkStartWait     = 1,    -- AFK+TP: max wait for the animation-start signal after a purchase
-	AfkCooldownMax   = 25,   -- AFK+TP: max wait for the egg-opening animation (the game's cooldown) to finish
+	AfkCooldownCap   = 0.5,  -- AFK+TP: wait for the animation at Home at most this long, then go to the egg anyway (the game lets you buy earlier than the animation ends). Lower = faster, but more failed attempts
 	AfkEggOffset     = Vector3.new(0, 3, 6), -- AFK+TP: where to stand relative to the egg center
 }
 
@@ -340,22 +338,18 @@ end
 
 local RunService = game:GetService("RunService")
 
--- After a successful purchase: wait for OUR animation to start, then to finish.
--- `startBefore` = startCount right before the purchase call.
+-- After a successful purchase: wait for OUR animation to start, then for it to finish,
+-- but no longer than AfkCooldownCap (the game accepts the next purchase before the animation ends).
 local function waitCooldown(startBefore, token)
 	local t = os.clock()
 	local function alive() return AutoOpen.Enabled and AutoOpen.Token == token end
-	-- 1) the animation starts shortly after the purchase
+	local function left() return CONFIG.AfkCooldownCap - (os.clock() - t) end
 	if signalsHooked then
-		while startCount <= startBefore and not isOpening()
-			and os.clock() - t < CONFIG.AfkStartWait and alive() do
+		while startCount <= startBefore and not isOpening() and left() > 0 and alive() do
 			RunService.Heartbeat:Wait()
 		end
-	else
-		task.wait(0.15) -- no signals: can't see the start, just give it a moment
 	end
-	-- 2) wait until every animation is over
-	while animActive() and os.clock() - t < CONFIG.AfkCooldownMax and alive() do
+	while animActive() and left() > 0 and alive() do
 		RunService.Heartbeat:Wait()
 	end
 end
@@ -383,17 +377,6 @@ local function toEgg(center)
 	return true
 end
 
--- Self-tuning pause at the egg: starts at AfkArriveWait, goes up a bit when the first
--- attempt gets rejected (server hasn't seen our position yet), creeps back down when
--- the first attempt keeps succeeding.
-local afkArrive = nil
-local afkFastStreak = 0
-
-function EggTools.ResetAfkTuning()
-	afkArrive = nil
-	afkFastStreak = 0
-end
-
 -- One AFK cycle: Home -> egg -> buy (quick retries) -> Home -> wait for cooldown
 local function afkOpenOnce(eggId, amount, token)
 	local function alive() return AutoOpen.Enabled and AutoOpen.Token == token end
@@ -403,10 +386,10 @@ local function afkOpenOnce(eggId, amount, token)
 		return false, "Character not ready"
 	end
 
-	-- a previous animation still running? let it finish while we are still at Home
+	-- a previous animation still running? give it a moment while we are still at Home
 	if animActive() then
 		local t = os.clock()
-		while animActive() and os.clock() - t < CONFIG.AfkCooldownMax and alive() do
+		while animActive() and os.clock() - t < CONFIG.AfkCooldownCap and alive() do
 			RunService.Heartbeat:Wait()
 		end
 		if not alive() then return false, "stopped" end
@@ -418,19 +401,14 @@ local function afkOpenOnce(eggId, amount, token)
 	end
 
 	toEgg(center)
-	-- tiny pause so the server gets our new position (the purchase packet also needs ping/2 to arrive)
-	task.wait(afkArrive or CONFIG.AfkArriveWait)
 
 	local ok, msg = false, "no attempt"
 	local startBefore = startCount
-	local used = 0
 	for attempt = 1, CONFIG.AfkAttempts do
-		used = attempt
 		startBefore = startCount
 		local okCall, a, b = pcall(EggTools.OpenOnce, eggId, amount)
 		if okCall then ok, msg = a, b else ok, msg = false, tostring(a) end
 		if ok then break end
-		warn(("[Eggs AFK] attempt %d/%d failed: %s"):format(attempt, CONFIG.AfkAttempts, tostring(msg)))
 		if not alive() then break end
 		local r = getRoot()
 		if r and (r.Position - center.Position).Magnitude > 12 then
@@ -439,19 +417,7 @@ local function afkOpenOnce(eggId, amount, token)
 		task.wait(CONFIG.AfkRetryWait)
 	end
 
-	-- tune the pause for the next cycle
 	if ok then
-		if used == 1 then
-			afkFastStreak += 1
-			if afkArrive and afkFastStreak >= 5 then
-				afkFastStreak = 0
-				afkArrive = math.max(CONFIG.AfkArriveWait, afkArrive - 0.01)
-			end
-		else
-			afkFastStreak = 0
-			afkArrive = math.min(CONFIG.AfkArriveMax, (afkArrive or CONFIG.AfkArriveWait) + 0.03)
-		end
-
 		-- FireServer returns instantly: give the packet time to reach the server before we leave the egg
 		if Captured.method == "FireServer" then
 			local ping = 0
