@@ -747,7 +747,18 @@ function AutoFarm.SetLocation(locations)
 	AutoFarm.Location = locations
 end
 
+-- известный ли это тип монеты (есть в игровом Directory или прямо сейчас на карте)
+local function isKnownType(name)
+	local ok, def = pcall(function() return Library.Directory.Coins[name] end)
+	if ok and def ~= nil then return true end
+	for coin in pairs(CoinManager.AllCoins) do
+		if coinTypeName(coin) == name then return true end
+	end
+	return false
+end
+
 -- types: nil / {} = ломать все типы | { "Name", ... } (подходят и метки "Name [категория]")
+-- Неизвестные имена (опечатки, названия локаций и т.п.) игнорируются, чтобы фильтр не отсёк все монеты.
 function AutoFarm.SetCoinTypes(types)
 	local set, n = {}, 0
 	if type(types) == "table" then
@@ -759,13 +770,22 @@ function AutoFarm.SetCoinTypes(types)
 				name = stripLabel(k)
 			end
 			if name and name ~= "" and not set[name] then
-				set[name] = true
-				n += 1
+				if isKnownType(name) then
+					set[name] = true
+					n += 1
+				else
+					warn("[Pets] Неизвестный тип монеты, пропускаю: " .. name)
+				end
 			end
 		end
 	elseif type(types) == "string" and types ~= "" then
-		set[stripLabel(types)] = true
-		n = 1
+		local name = stripLabel(types)
+		if isKnownType(name) then
+			set[name] = true
+			n = 1
+		else
+			warn("[Pets] Неизвестный тип монеты, пропускаю: " .. name)
+		end
 	end
 	TypeFilter.set = n > 0 and set or nil
 end
