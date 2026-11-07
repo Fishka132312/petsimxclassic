@@ -20,7 +20,7 @@ local scripts = {
   'Auto/AutoRainbow.lua',
   'Auto/AutoIndex.lua',
   'Misc/AntiLag.lua',
-  'Misc/AntiLagDa.lua'
+  'Misc/AntiLagDa.lua',
   'Custom/Teams.lua',
   'Custom/PetChanger.lua',
 }
