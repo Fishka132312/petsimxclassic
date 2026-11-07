@@ -1,15 +1,15 @@
 --[[
 	Inventory: Pet Teams  (LocalScript addon)
-	- Команды петов: сохранить текущих экипированных, экипировать одним кликом
-	- Undo: вернуть предыдущий набор
-	- Хоткеи Shift+1..9 (пока открыт инвентарь)
-	- Переименование, обновление, удаление (с подтверждением)
-	- Сохранение в файл (если executor умеет writefile)
-	Повторный запуск сам выгружает старую версию (даже если она ещё грузится) - копии не накладываются.
-	Антиспам: CONFIG.Cooldown. Уведомления об экипировке/снятии убраны (остались только ошибки).
+	- Pet teams: save the currently equipped pets, equip them with one click
+	- Undo: restore the previous set
+	- Hotkeys Shift+1..9 (while the inventory is open)
+	- Rename, update, delete (with confirmation)
+	- Saving to a file (if the executor supports writefile)
+	Re-running the script unloads the old version by itself (even if it is still loading) - copies don't stack.
+	Anti-spam: CONFIG.Cooldown. Equip/unequip notifications were removed (only errors remain).
 
-	ВКЛ/ВЫКЛ:  getgenv().TeamsEnabled = true / false
-	По умолчанию выключено (CONFIG.StartEnabled). Когда выключено - Teams полностью скрыты из инвентаря.
+	ON/OFF:  getgenv().TeamsEnabled = true / false
+	Off by default (CONFIG.StartEnabled). When off, Teams is fully hidden from the inventory.
 ]]
 
 if not game:IsLoaded() then
@@ -31,44 +31,44 @@ if env.InventoryTeamsUnload then
 	pcall(env.InventoryTeamsUnload)
 	env.InventoryTeamsUnload = nil
 end
--- Эта копия "жива", пока dead == false. Заглушка регистрируется СРАЗУ: если запустить скрипт ещё раз,
--- пока эта копия ещё грузится (WaitForChild / Library), она получит dead = true и сама остановится.
+-- This copy is "alive" while dead == false. The stub is registered IMMEDIATELY: if the script is run again
+-- while this copy is still loading (WaitForChild / Library), it gets dead = true and stops by itself.
 local dead = false
 env.InventoryTeamsUnload = function()
 	dead = true
 end
 
 ----------------------------------------------------------------------
--- Настройки
+-- Settings
 ----------------------------------------------------------------------
 local CONFIG = {
 	MaxTeams = 20,
 	MaxNameLength = 20,
-	-- Где стоит кнопка "Teams":
-	--   "BottomBar" - иконка в нижней панели игры (рядом с корзиной/карандашом/замком)
-	--   "TopCenter" / "Left" / "Right" - обычная кнопка у рамки (запасной вариант)
+	-- Where the "Teams" button is placed:
+	--   "BottomBar" - an icon in the game's bottom bar (next to the trash/pencil/lock)
+	--   "TopCenter" / "Left" / "Right" - a regular button by the frame (fallback)
 	TogglePlacement = "BottomBar",
-	-- Звезда в нижней панели. Offset - сдвиг по вертикали (доля высоты кнопки): минус = выше, плюс = ниже.
-	-- Если звезда чуть ниже остальных иконок - уменьши (-0.09), если выше - увеличь (-0.04).
+	-- Star in the bottom bar. Offset - vertical shift (fraction of button height): minus = higher, plus = lower.
+	-- If the star is slightly lower than the other icons - decrease (-0.09), if higher - increase (-0.04).
 	StarOffsetY = -0.07,
-	StarSize = 1.1, -- размер звезды относительно кнопки (было 1.28 - слишком крупная)
-	StarStroke = 2.6, -- толщина обводки звезды
-	-- Размер одной плитки узора на фоне карточек (px). Больше = крупнее узор, меньше = мельче.
+	StarSize = 1.1, -- star size relative to the button (was 1.28 - too big)
+	StarStroke = 2.6, -- star outline thickness
+	-- Size of one pattern tile on the card background (px). Bigger = larger pattern, smaller = finer.
 	PatternTile = 80,
-	-- Если знаешь индекс ремоута "Unequip All" (ReplicatedStorage:GetChildren()[N]) - впиши N сюда, Learn не нужен.
-	-- Если nil - скрипт сам ищет ремоут по имени "Unequip All Pets", а если не нашёл - выучишь через Learn.
+	-- If you know the index of the "Unequip All" remote (ReplicatedStorage:GetChildren()[N]) - put N here, Learn is not needed.
+	-- If nil - the script looks for the remote by the name "Unequip All Pets" itself, and if not found - you learn it via Learn.
 	UnequipAllIndex = nil,
-	-- false = ходим на сервер ТОЛЬКО так же, как сама игра (Library.Network.Invoke "Equip Pet"/"Unequip Pet"/"Unequip All Pets").
-	-- Выученные через Learn ремоуты (могут быть не те) игнорируются. true = старое поведение.
+	-- false = talk to the server ONLY the way the game itself does (Library.Network.Invoke "Equip Pet"/"Unequip Pet"/"Unequip All Pets").
+	-- Remotes learned via Learn (might be the wrong ones) are ignored. true = old behavior.
 	UseLearned = false,
-	-- true = экипировка/снятие через НАСТОЯЩИЕ кнопки игры (карточка пета / Unequip All): игра сама шлёт свои ремоуты,
-	-- индексы и Learn не нужны. Если не сработало - запасной путь через Library.Network.Invoke.
+	-- true = equip/unequip through the game's REAL buttons (pet card / Unequip All): the game sends its own remotes,
+	-- indexes and Learn are not needed. If it didn't work - fallback via Library.Network.Invoke.
 	UseUI = true,
-	-- Антиспам: минимальная пауза между действиями (экипировка / снятие / Undo / сохранить / обновить), секунды.
+	-- Anti-spam: minimum pause between actions (equip / unequip / Undo / save / update), seconds.
 	Cooldown = 0.7,
-	-- Антиспам вкладки Teams: пока идёт анимация входа/выхода, повторные клики по звезде игнорируются (секунды).
+	-- Teams tab anti-spam: while the enter/exit animation runs, repeated clicks on the star are ignored (seconds).
 	TabCooldown = 0.45,
-	-- Стартовое состояние: false = Teams скрыты, пока не включишь getgenv().TeamsEnabled = true
+	-- Start state: false = Teams hidden until you set getgenv().TeamsEnabled = true
 	StartEnabled = false,
 }
 
@@ -76,30 +76,30 @@ if env.TeamsEnabled == nil then
 	env.TeamsEnabled = CONFIG.StartEnabled
 end
 
--- ОДИН акцент (голубой, как у игры). Всё остальное - нейтральные оттенки того же цвета.
--- Красный - только для опасных действий (Unequip / удалить / ошибки), янтарный - только для предупреждений.
+-- ONE accent (blue, like the game). Everything else is neutral shades of the same color.
+-- Red - only for dangerous actions (Unequip / delete / errors), amber - only for warnings.
 local ACCENT = Color3.fromRGB(59, 177, 252)
 local WARN = Color3.fromRGB(255, 200, 100)
 local THEME = {
 	Panel = Color3.fromRGB(255, 255, 255),
-	Card = Color3.fromRGB(207, 232, 255), -- обычная карточка
-	CardTop1 = Color3.fromRGB(194, 224, 252), -- сильная команда (чуть насыщеннее)
-	CardTop2 = Color3.fromRGB(178, 214, 248), -- самая сильная
+	Card = Color3.fromRGB(207, 232, 255), -- regular card
+	CardTop1 = Color3.fromRGB(194, 224, 252), -- strong team (slightly more saturated)
+	CardTop2 = Color3.fromRGB(178, 214, 248), -- strongest
 	Toast = Color3.fromRGB(19, 48, 57),
 	Dark = Color3.fromRGB(19, 48, 57),
 	Stroke = Color3.fromRGB(19, 48, 57),
-	StrokeTop = Color3.fromRGB(24, 84, 124), -- обводка самой сильной команды
+	StrokeTop = Color3.fromRGB(24, 84, 124), -- outline of the strongest team
 	Accent = ACCENT,
 	AccentLight = Color3.fromRGB(165, 224, 255),
-	Field = Color3.fromRGB(246, 248, 252), -- поле имени команды (светлое, не синее)
+	Field = Color3.fromRGB(246, 248, 252), -- team name field (light, not blue)
 	FieldPlaceholder = Color3.fromRGB(132, 150, 165),
-	Soft = Color3.fromRGB(84, 122, 150), -- второстепенные кнопки (Update / X / Undo / Learn)
-	IconBlue = Color3.fromRGB(66, 176, 248), -- заливка иконок нижней панели
-	IconYellow = Color3.fromRGB(255, 205, 50), -- как у иконок игры, когда режим включён (карандаш / сетка / замок)
-	IconStroke = Color3.fromRGB(19, 53, 68), -- обводка иконок нижней панели
-	Green = ACCENT, -- совместимость: зелёного больше нет, "успех" = акцент
+	Soft = Color3.fromRGB(84, 122, 150), -- secondary buttons (Update / X / Undo / Learn)
+	IconBlue = Color3.fromRGB(66, 176, 248), -- fill of the bottom bar icons
+	IconYellow = Color3.fromRGB(255, 205, 50), -- like the game's icons when the mode is on (pencil / grid / lock)
+	IconStroke = Color3.fromRGB(19, 53, 68), -- outline of the bottom bar icons
+	Green = ACCENT, -- compatibility: there is no green anymore, "success" = accent
 	Red = Color3.fromRGB(238, 82, 82),
-	Orange = WARN, -- совместимость: предупреждения
+	Orange = WARN, -- compatibility: warnings
 	Gray = Color3.fromRGB(110, 128, 146),
 	White = Color3.new(1, 1, 1),
 }
@@ -116,7 +116,7 @@ local SOUNDS = {
 local PLACEHOLDER_ICON = "70582157891773"
 
 ----------------------------------------------------------------------
--- Библиотека игры
+-- Game library
 ----------------------------------------------------------------------
 local okLib, Library = pcall(function()
 	return require(ReplicatedStorage:WaitForChild("Framework"):WaitForChild("Library"))
@@ -150,21 +150,21 @@ if dead then
 end
 
 ----------------------------------------------------------------------
--- Состояние
+-- State
 ----------------------------------------------------------------------
 local teams = {} -- { {name = "", pets = { {uid, id, g, r, sh, img} } } }
 local cards = {} -- [team] = { frame, stroke, status, equipBtn, equipLabel, icons }
 local previousSet = nil
-local lastTeam = nil -- последняя команда, надетая кнопкой
+local lastTeam = nil -- the last team equipped via the button
 local busy = false
 local drawerOpen = false
 local conns = {}
 local created = {}
-local net = {} -- выученные ремоуты: net.equip / net.unequip
+local net = {} -- learned remotes: net.equip / net.unequip
 local learnStep = nil -- nil | "equip" | "unequip" | "unequipAll"
 local learnClickAt = 0
 local learnClickConn = nil
-local lastActionAt = 0 -- антиспам: когда закончилось/началось последнее действие
+local lastActionAt = 0 -- anti-spam: when the last action finished/started
 
 local function cooldownOk()
 	return os.clock() - lastActionAt >= CONFIG.Cooldown
@@ -178,7 +178,7 @@ local function track(c)
 end
 
 ----------------------------------------------------------------------
--- Утилиты
+-- Utilities
 ----------------------------------------------------------------------
 local rng = Random.new()
 
@@ -243,8 +243,8 @@ local function label(parent, props)
 	return l
 end
 
--- Шаблон: настоящая цветная кнопка из инвентаря игры (Equip Best / Unequip All).
--- Берём у неё рамку, скругление, обводку и градиент, чтобы наши кнопки выглядели один в один.
+-- Template: the real colored button from the game's inventory (Equip Best / Unequip All).
+-- We take its frame, corner radius, stroke and gradient so our buttons look identical.
 local btnTemplate = nil
 local function getTemplate()
 	if btnTemplate == nil then
@@ -272,7 +272,7 @@ local function cloneStyled(parent, p)
 				d:Destroy()
 			end
 		end
-		-- у шаблона скругление/обводка могут быть в долях размера -> на маленьких кнопках выглядят криво
+		-- the template's corner/stroke may be in fractions of size -> they look off on small buttons
 		local cr = c:FindFirstChildOfClass("UICorner")
 		if cr then
 			cr.CornerRadius = UDim.new(0, p.Radius or 8)
@@ -317,9 +317,9 @@ local function cloneStyled(parent, p)
 	return nil
 end
 
--- UIScale масштабирует объект ОТНОСИТЕЛЬНО AnchorPoint. Если якорь (1,0) или (0,0) -
--- кнопка при наведении "уезжает" в одну сторону и наезжает на соседей.
--- Пересчитываем позицию так, чтобы якорь был в центре (визуально кнопка на том же месте).
+-- UIScale scales an object RELATIVE to AnchorPoint. If the anchor is (1,0) or (0,0) -
+-- the button "drifts" to one side on hover and overlaps its neighbors.
+-- Recalculate the position so the anchor is in the center (the button stays visually in the same place).
 local function centerAnchor(p)
 	local a = p.AnchorPoint or Vector2.new()
 	local pos = p.Position or UDim2.new()
@@ -392,7 +392,7 @@ local function makeButton(parent, p)
 end
 
 ----------------------------------------------------------------------
--- Данные игры
+-- Game data
 ----------------------------------------------------------------------
 local function hasEquipped(save, pet)
 	local ok, r = pcall(Library.Shared.HasPetEquipped, save, pet)
@@ -465,7 +465,7 @@ local function snapshotEquipped()
 end
 
 ----------------------------------------------------------------------
--- Ремоуты экипировки (выучиваются через кнопку Learn)
+-- Equip remotes (learned via the Learn button)
 ----------------------------------------------------------------------
 local UID_MARK = "<<UID>>"
 
@@ -540,7 +540,7 @@ local function loadNet(raw)
 	end
 end
 
-local onNetStale -- задаётся ниже (UI)
+local onNetStale -- assigned below (UI)
 local function staleEntry(entry)
 	for k, e in pairs(net) do
 		if e == entry then
@@ -565,7 +565,7 @@ local function resolveRemote(entry)
 	return nil
 end
 
--- возвращает то же, что pcall: ok, результат...
+-- returns the same as pcall: ok, result...
 local function callNet(entry, uid)
 	local remote = resolveRemote(entry)
 	if not remote then
@@ -587,7 +587,7 @@ local function callNet(entry, uid)
 	return false, "remote type changed - press Learn"
 end
 
--- ищем ремоут "Unequip All" без Learn: по индексу из CONFIG или по имени
+-- look for the "Unequip All" remote without Learn: by the index from CONFIG or by name
 local function detectUnequipAll()
 	if net.unequipAll then
 		return false
@@ -622,7 +622,7 @@ local function detectUnequipAll()
 end
 
 ----------------------------------------------------------------------
--- Экипировка / снятие (общие функции)
+-- Equip / unequip (shared functions)
 ----------------------------------------------------------------------
 local function isEq(uid)
 	local sv = Library.Save.Get()
@@ -658,7 +658,7 @@ local function anyEquipped(list)
 	return false
 end
 
--- ждём, пока условие станет true (данные сейва приходят с сервера с задержкой)
+-- wait until the condition becomes true (save data arrives from the server with a delay)
 local function waitUntil(fn, timeout)
 	local t0 = os.clock()
 	while os.clock() - t0 < timeout do
@@ -685,7 +685,7 @@ end
 
 
 ----------------------------------------------------------------------
--- Экипировка через настоящий UI игры (игра сама шлёт свои ремоуты - Learn не нужен)
+-- Equipping via the game's real UI (the game sends its own remotes - Learn is not needed)
 ----------------------------------------------------------------------
 local function fireButton(btn, variant)
 	if not btn then
@@ -734,7 +734,7 @@ local function findUnequipAllButton()
 	return nil
 end
 
--- один пет: жмём его карточку как игрок. true только если сейв реально поменялся
+-- one pet: click its card like a player. true only if the save actually changed
 local function uiTogglePet(uid, equip)
 	if CONFIG.UseUI == false then
 		return false
@@ -753,7 +753,7 @@ local function uiTogglePet(uid, equip)
 		if waitUntil(function()
 			return isEq(uid) == equip
 		end, 1.5) then
-			task.wait(0.1) -- даём игре освободить свой busy-флаг
+			task.wait(0.1) -- let the game release its busy flag
 			return true
 		end
 	end
@@ -767,9 +767,9 @@ local function uiUnequipAll()
 	return fireButton(findUnequipAllButton(), 1)
 end
 
--- один пет: вызов сервера как в самой игре + повторы (сервер режет слишком частые запросы).
--- Успех засчитываем ТОЛЬКО когда сервер ответил true или сейв реально поменялся,
--- иначе раньше LocalEquipPet "рисовал" пета надетым, хотя сервер его не надел.
+-- one pet: server call like in the game itself + retries (the server throttles too frequent requests).
+-- Success is counted ONLY when the server answered true or the save actually changed,
+-- otherwise LocalEquipPet used to "draw" the pet as equipped even though the server didn't equip it.
 local function petCall(uid, equip)
 	if isEq(uid) == equip then
 		return true
@@ -788,11 +788,11 @@ local function petCall(uid, equip)
 			okI, res, msg = pcall(Library.Network.Invoke, name, uid)
 		end
 		if okI and res == true then
-			-- как в игре: сервер подтвердил - обновляем локально
+			-- like in the game: the server confirmed - update locally
 			pcall(Library.PetCmds.LocalEquipPet, LocalPlayer, uid, equip)
 			return true
 		end
-		-- FireServer / непонятный ответ: ждём подтверждения от сервера через сейв
+		-- FireServer / unclear response: wait for confirmation from the server via the save
 		if okI and res ~= false and waitUntil(function()
 			return isEq(uid) == equip
 		end, 1) then
@@ -810,9 +810,9 @@ local function petCall(uid, equip)
 	return false, lastMsg
 end
 
--- Снять петов из list (по умолчанию - всех экипированных).
--- Сначала "Unequip All" одним запросом, ПРОВЕРЯЕМ что петы реально сняты, остаток - по одному.
--- Возвращает: сколько не удалось снять, текст ошибки
+-- Unequip pets from list (by default - all equipped).
+-- First "Unequip All" in one request, CHECK that the pets are really unequipped, the rest - one by one.
+-- Returns: how many failed to unequip, error text
 local function unequipPets(list)
 	list = list or equippedUids()
 	if #list == 0 then
@@ -822,7 +822,7 @@ local function unequipPets(list)
 	local function allOff()
 		return not anyEquipped(list)
 	end
-	-- 1) настоящая кнопка Unequip All из инвентаря игры
+	-- 1) the game's real Unequip All button from the inventory
 	for _ = 1, 2 do
 		if uiUnequipAll() and waitUntil(allOff, 3) then
 			return 0
@@ -844,13 +844,13 @@ local function unequipPets(list)
 			task.wait(0.2 * attempt)
 		end
 	else
-		-- как в самой игре
+		-- like in the game itself
 		local okI, res = pcall(Library.Network.Invoke, "Unequip All Pets")
 		if okI and res and waitUntil(allOff, 2.5) then
 			return 0
 		end
 	end
-	-- запасной путь: снимаем по одному только тех, кто ещё надет
+	-- fallback: unequip one by one only those still equipped
 	local failed, lastErr = 0, nil
 	for _, uid in ipairs(stillEquipped(list)) do
 		local okR, msg = petCall(uid, false)
@@ -861,13 +861,13 @@ local function unequipPets(list)
 		task.wait(0.08)
 	end
 	waitUntil(allOff, 1.5)
-	-- финальная проверка по реальному состоянию сейва
+	-- final check against the real state of the save
 	failed = math.max(failed, #stillEquipped(list))
 	return failed, lastErr
 end
 
 ----------------------------------------------------------------------
--- Сохранение в файл
+-- Saving to a file
 ----------------------------------------------------------------------
 local canFS = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
 local fileName = ("InventoryTeams_%d.json"):format(LocalPlayer.UserId)
@@ -927,7 +927,7 @@ local function loadTeams()
 end
 
 ----------------------------------------------------------------------
--- UI: тост (всплывающее уведомление)
+-- UI: toast (popup notification)
 ----------------------------------------------------------------------
 local toastGroup, toastLabel
 local toastToken = 0
@@ -964,10 +964,10 @@ local function toast(text, color, sticky)
 end
 
 ----------------------------------------------------------------------
--- Логика экипировки
+-- Equip logic
 ----------------------------------------------------------------------
 local updateStates -- forward
-local needLearnHint -- forward (задаётся ниже)
+local needLearnHint -- forward (assigned below)
 
 local function applyUids(wantedIn, title, team)
 	if busy then
@@ -1037,7 +1037,7 @@ local function applyUids(wantedIn, title, team)
 
 			local failedU = 0
 
-			-- 1) сначала снимаем текущую команду
+			-- 1) first unequip the current team
 			local extras = {}
 			for _, uid in ipairs(current) do
 				if not wantedSet[uid] then
@@ -1045,13 +1045,13 @@ local function applyUids(wantedIn, title, team)
 				end
 			end
 			if #extras > 0 then
-				-- есть Unequip All: снимаем всех разом (нужных наденем заново), иначе только лишних
+				-- Unequip All exists: unequip everything at once (the needed ones will be equipped again), otherwise only the extras
 				local f, msg = unequipPets((net.unequipAll or not CONFIG.UseLearned) and current or extras)
 				failedU += f
 				lastErr = msg or lastErr
 			end
 
-			-- 2) надеваем нужных (2 прохода: сейв с сервера может прийти позже и "снять" пета обратно)
+			-- 2) equip the needed ones (2 passes: the save from the server may arrive later and "unequip" a pet back)
 			for pass = 1, 2 do
 				if dead then
 					return
@@ -1067,7 +1067,7 @@ local function applyUids(wantedIn, title, team)
 						task.wait(0.06)
 					end
 				end
-				-- ждём, пока сейв подтвердит итог
+				-- wait until the save confirms the result
 				local done = waitUntil(function()
 					for _, uid in ipairs(wanted) do
 						if not isEq(uid) then
@@ -1081,7 +1081,7 @@ local function applyUids(wantedIn, title, team)
 					break
 				end
 			end
-			-- реальный итог по сейву, а не по ответам ремоутов
+			-- real result from the save, not from remote responses
 			failed = 0
 			for _, uid in ipairs(wanted) do
 				if not isEq(uid) then
@@ -1095,7 +1095,7 @@ local function applyUids(wantedIn, title, team)
 				end
 			end
 
-			-- уведомление "надел/снял" убрано: показываем только ошибки
+			-- the "equipped/unequipped" notification was removed: only errors are shown
 			if failed > 0 or failedU > 0 then
 				local parts = {}
 				if failedU > 0 then
@@ -1136,9 +1136,9 @@ local function equipTeam(team)
 	applyUids(uids, team.name, team)
 end
 
--- какая команда считается надетой: надеты РОВНО её петы (те, что есть в инвентаре и влезают в слоты),
--- без лишних. Раньше хватало "все петы команды надеты" - и после Equip Best (где они тоже есть)
--- команда ложно показывалась надетой, а кнопка снимала всех. При нескольких совпадениях - последняя надетая.
+-- which team counts as equipped: EXACTLY its pets are equipped (those that are in the inventory and fit into the slots),
+-- with no extras. Before, "all team pets are equipped" was enough - and after Equip Best (where they are also present)
+-- the team was falsely shown as equipped, and the button unequipped everyone. With several matches - the last equipped one.
 local function activeTeams()
 	local res = {}
 	local sv = Library.Save.Get()
@@ -1186,12 +1186,12 @@ local function activeTeams()
 	return res
 end
 
--- экипирована ли сейчас эта команда
+-- is this team currently equipped
 local function teamActive(team)
 	return activeTeams()[team] == true
 end
 
--- кнопка "Unequip": сразу снимает ВСЕХ надетых петов
+-- the "Unequip" button: immediately unequips ALL equipped pets
 local function unequipEverything()
 	if busy then
 		return
@@ -1257,7 +1257,7 @@ local function undoEquip()
 end
 
 ----------------------------------------------------------------------
--- UI: основа
+-- UI: base
 ----------------------------------------------------------------------
 local drawer, list, emptyLabel, subLabel, activeLabel
 local toggleBtn, toggleLabel, toggleStar
@@ -1269,9 +1269,9 @@ end
 local refreshLearnBtn
 local rebuild
 
--- пока открыты Teams: прячем сетку петов и меняем заголовок "Your Pets"
+-- while Teams is open: hide the pet grid and change the "Your Pets" title
 local hiddenGui = {}
-local mainWrap = nil -- { group, main, pos, size } пока Main в обёртке
+local mainWrap = nil -- { group, main, pos, size } while Main is in the wrapper
 local titleObj, titleOldText, titleNewText
 local amountObj, amountOld, amountNew
 
@@ -1287,7 +1287,7 @@ local function findTitle()
 	return nil
 end
 
--- deferMain: сетку петов игры не прячем мгновенно - её плавно гасит обёртка (см. wrapMain), прячем после анимации
+-- deferMain: the game's pet grid is not hidden instantly - the wrapper fades it smoothly (see wrapMain), hide after the animation
 local function setUnderlying(hide, deferMain)
 	if hide then
 		local main = frame:FindFirstChild("Main") or (mainWrap and mainWrap.main)
@@ -1304,7 +1304,7 @@ local function setUnderlying(hide, deferMain)
 				titleOldText = titleObj.Text
 				titleNewText = (titleOldText:gsub("[Pp]ets", "Teams"))
 				titleObj:SetAttribute("TeamsOrigText", titleOldText)
-				titleObj.Text = titleNewText -- текст меняется сразу, без анимации
+				titleObj.Text = titleNewText -- text changes immediately, without animation
 			end
 		end
 		if not amountObj then
@@ -1345,10 +1345,10 @@ local function setUnderlying(hide, deferMain)
 	end
 end
 
--- Обёртка для плавного исчезновения сетки петов игры.
--- Frame.Main нельзя "погасить" одним свойством, поэтому на время анимации кладём его в CanvasGroup и гасим группу:
--- тогда плавно уходят ВСЕ элементы сразу (петы, обводки, скругления). После анимации Main возвращается на место.
--- Группа чуть больше Main (WRAP_MARGIN), чтобы ничего не обрезалось по краям (например, полоса прокрутки).
+-- Wrapper for smoothly fading out the game's pet grid.
+-- Frame.Main can't be "faded" with a single property, so for the duration of the animation we put it into a CanvasGroup and fade the group:
+-- then ALL elements fade smoothly at once (pets, strokes, corners). After the animation Main goes back to its place.
+-- The group is slightly larger than Main (WRAP_MARGIN) so nothing gets clipped at the edges (e.g. the scrollbar).
 local WRAP_MARGIN = 30
 
 local function unwrapMain()
@@ -1397,12 +1397,12 @@ local function wrapMain(startAlpha)
 	return g
 end
 
--- Панель шире рамки на SCROLL_EXTRA (как Pets у игры: Size = (1, 22, 1, 0)), центр сдвинут на половину
+-- Panel wider than the frame by SCROLL_EXTRA (like the game's Pets: Size = (1, 22, 1, 0)), center shifted by half
 local SCROLL_EXTRA = 14
 local openPos = UDim2.new(0.5, SCROLL_EXTRA / 2, 0.5, 0)
 local closedPos = UDim2.new(0.5, SCROLL_EXTRA / 2, 0.5, 28)
 local drawerToken = 0
-local drawerLockUntil = 0 -- антиспам вкладки: до этого момента клики по звезде игнорируются
+local drawerLockUntil = 0 -- tab anti-spam: until this moment clicks on the star are ignored
 
 local function hideMainNow()
 	for obj in pairs(hiddenGui) do
@@ -1424,7 +1424,7 @@ local function setDrawer(open, instant)
 	elseif toggleBtn then
 		toggleBtn.BackgroundColor3 = open and THEME.AccentLight or THEME.Accent
 	end
-	-- Без анимации: и открытие, и закрытие мгновенные
+	-- No animation: both opening and closing are instant
 	unwrapMain()
 	if open then
 		drawer.Visible = true
@@ -1495,7 +1495,7 @@ local function saveEquippedAsTeam()
 end
 
 ----------------------------------------------------------------------
--- Обучение: ловим ремоуты экипировки / снятия
+-- Learning: capture the equip / unequip remotes
 ----------------------------------------------------------------------
 local canHook = type(hookmetamethod) == "function" and type(getnamecallmethod) == "function"
 	and type(checkcaller) == "function"
@@ -1530,7 +1530,7 @@ local function ensureHook()
 	return hookState.installed == true
 end
 
--- после обучения хук снимаем: он перехватывает ВСЕ вызовы игры и мог мешать оригинальному инвентарю
+-- after learning we remove the hook: it intercepts ALL game calls and could interfere with the original inventory
 local function releaseHook()
 	if hookState then
 		hookState.callback = nil
@@ -1558,7 +1558,7 @@ function refreshLearnBtn()
 		learnBtn.BackgroundColor3 = THEME.Red
 		learnLbl.Text = "Cancel"
 	elseif (CONFIG.UseUI ~= false and not CONFIG.UseLearned) or (net.equip and net.unequip and net.unequipAll) then
-		learnBtn.Visible = false -- всё выучено - кнопка не нужна
+		learnBtn.Visible = false -- everything is learned - the button is not needed
 	else
 		learnBtn.Visible = true
 		learnBtn.BackgroundColor3 = THEME.Soft
@@ -1584,7 +1584,7 @@ end
 
 local learnCands = {}
 
--- следит за числом надетых петов: когда оно резко падает (>=2 или до нуля) - берём вызов, случившийся перед этим
+-- watches the number of equipped pets: when it drops sharply (>=2 or to zero) - take the call that happened before that
 local function watchUnequipAll(tok)
 	table.clear(learnCands)
 	task.spawn(function()
@@ -1617,7 +1617,7 @@ local function watchUnequipAll(tok)
 				end
 				local best
 				for _, st in pairs(stats) do
-					if st.count <= 2 then -- повторяющиеся (фоновые) вызовы отбрасываем
+					if st.count <= 2 then -- repeating (background) calls are discarded
 						local score = st.count * 10 + (st.c.n == 0 and 0 or 5)
 						if not best or score < best.score then
 							best = { score = score, c = st.c }
@@ -1642,7 +1642,7 @@ local function watchUnequipAll(tok)
 	end)
 end
 
--- вызывается уже вне хука (task.defer)
+-- called outside the hook (task.defer)
 local function handleCall(remote, method, args)
 	local step = learnStep
 	if not step then
@@ -1656,7 +1656,7 @@ local function handleCall(remote, method, args)
 	for _, pet in ipairs(save.Pets) do
 		owned[pet.uid] = true
 	end
-	-- есть ли в аргументах uid пета
+	-- does the arguments contain a pet uid
 	local found = false
 	local template = mapArgs(args, args.n, function(v)
 		if type(v) == "string" and owned[v] then
@@ -1670,8 +1670,8 @@ local function handleCall(remote, method, args)
 		return
 	end
 
-	-- шаг 3: "Unequip All" - вызов БЕЗ uid в аргументах (как Event:InvokeServer()); просто запоминаем вызовы,
-	-- а выбирает нужный watchUnequipAll по тому, что после него петы реально сняты
+	-- step 3: "Unequip All" - a call WITHOUT a uid in the arguments (like Event:InvokeServer()); we just remember the calls,
+	-- and watchUnequipAll picks the right one by the fact that the pets are really unequipped after it
 	if step == "unequipAll" then
 		if found then
 			return
@@ -1728,7 +1728,7 @@ local function startLearn()
 		return
 	end
 	if net.equip and net.unequip and not net.unequipAll then
-		learnStep = "unequipAll" -- осталось выучить только Unequip All
+		learnStep = "unequipAll" -- only Unequip All is left to learn
 	else
 		learnStep = "equip"
 	end
@@ -1770,7 +1770,7 @@ local function startLearn()
 end
 
 ----------------------------------------------------------------------
--- UI: кнопка пета (копия настоящей из инвентаря игры)
+-- UI: pet button (a copy of the real one from the game's inventory)
 ----------------------------------------------------------------------
 local function setVis(btn, name, v)
 	local o = btn:FindFirstChild(name)
@@ -1801,7 +1801,7 @@ local function makePetSlot(parent, entry, i, pet)
 	btn.AutoButtonColor = false
 	btn.Text = ""
 
-	-- ZIndexBehavior у игры Global: поднимаем всю кнопку над панелью
+	-- the game's ZIndexBehavior is Global: raise the whole button above the panel
 	local base = parent.ZIndex
 	btn.ZIndex = base + btn.ZIndex
 	for _, d in ipairs(btn:GetDescendants()) do
@@ -1810,13 +1810,13 @@ local function makePetSlot(parent, entry, i, pet)
 		end
 	end
 
-	-- иконка, уровень, звёзды и подсказка со статами при наведении - делает сама игра
+	-- icon, level, stars and the stats tooltip on hover - handled by the game itself
 	local viaGame = false
 	if pet and Library.PetUI and Library.PetUI.Create then
 		viaGame = pcall(Library.PetUI.Create, btn, entry.uid)
 	end
-	-- ButtonFX игры НЕ вызываем: он рассчитан на клетки 91px с отступом 20px, у нас клетки маленькие -
-	-- пет раздувается и залезает на соседей (а PetUI.Create может уже повесить свой эффект -> двойной зум).
+	-- we do NOT call the game's ButtonFX: it is designed for 91px cells with 20px spacing, ours are small -
+	-- the pet inflates and overlaps neighbors (and PetUI.Create may already attach its own effect -> double zoom).
 	if not viaGame then
 		local pi = btn:FindFirstChild("PetIcon")
 		if pi then
@@ -1835,7 +1835,7 @@ local function makePetSlot(parent, entry, i, pet)
 	end
 	setVis(btn, "DeleteOverlay", false)
 
-	-- свой hover: небольшой зум от центра + наведённый пет рисуется поверх соседей
+	-- own hover: a small zoom from the center + the hovered pet is drawn above its neighbors
 	btn.AnchorPoint = Vector2.new(0.5, 0.5)
 	local sc = btn:FindFirstChild("ButtonUIScale") or btn:FindFirstChildOfClass("UIScale")
 	if not sc then
@@ -1873,14 +1873,14 @@ local function makePetSlot(parent, entry, i, pet)
 end
 
 ----------------------------------------------------------------------
--- "Сила" команды: чем сильнее - тем чуть насыщеннее фон и толще обводка карточки
+-- Team "power": the stronger - the slightly more saturated the background and the thicker the card outline
 ----------------------------------------------------------------------
-local tierOf = {} -- [team] = 0 (обычная) | 1 (сильная) | 2 (самая сильная)
+local tierOf = {} -- [team] = 0 (regular) | 1 (strong) | 2 (strongest)
 
 local function teamPower(team)
 	local p = 0
 	for _, e in ipairs(team.pets) do
-		p += 1 -- сам пет
+		p += 1 -- the pet itself
 		if e.g then p += 1 end -- golden
 		if e.sh then p += 1.5 end -- shiny
 		if e.r then p += 2 end -- rainbow
@@ -1903,7 +1903,7 @@ local function computeTiers()
 	end)
 	local top, low = ranked[1].p, ranked[n].p
 	if top == low then
-		return -- все одинаковые - подсвечивать нечего
+		return -- all identical - nothing to highlight
 	end
 	for i, r in ipairs(ranked) do
 		if r.p == top then
@@ -1915,7 +1915,7 @@ local function computeTiers()
 end
 
 ----------------------------------------------------------------------
--- UI: карточка команды
+-- UI: team card
 ----------------------------------------------------------------------
 local function buildCard(index, team, pop)
 	local tier = tierOf[team] or 0
@@ -1939,7 +1939,7 @@ local function buildCard(index, team, pop)
 		PaddingLeft = UDim.new(0, 14),
 		PaddingRight = UDim.new(0, 12),
 	}, card)
-	-- тот же тайловый узор, что и на панели игры (rbxassetid://6511368117)
+	-- the same tiled pattern as on the game's panel (rbxassetid://6511368117)
 	local pat = new("ImageLabel", {
 		Name = "pattern",
 		BackgroundTransparency = 1,
@@ -1973,7 +1973,7 @@ local function buildCard(index, team, pop)
 		Padding = UDim.new(0, 10),
 	}, info)
 
-	-- имя команды: синяя "пилюля" с градиентом и обводкой, как кнопки игры; текст с тёмным контуром
+	-- team name: a blue "pill" with a gradient and outline, like the game's buttons; text with a dark outline
 	local nameHolder = new("Frame", {
 		Name = "NameHolder",
 		LayoutOrder = 1,
@@ -2025,7 +2025,7 @@ local function buildCard(index, team, pop)
 		end
 	end)
 
-	-- один ряд петов, прокручивается по горизонтали (колесо мыши / перетаскивание)
+	-- one row of pets, scrolls horizontally (mouse wheel / drag)
 	local iconsHolder = new("ScrollingFrame", {
 		Name = "Icons",
 		BackgroundTransparency = 1,
@@ -2076,7 +2076,7 @@ local function buildCard(index, team, pop)
 			LayoutOrder = i,
 		}, iconsHolder)
 		local slot = makePetSlot(cell, entry, i, byUid[entry.uid])
-		-- центр клетки чуть выше середины: снизу место под уровень (Level вылезает за кнопку на 20%)
+		-- cell center is slightly above the middle: room for the level at the bottom (Level sticks out past the button by 20%)
 		slot.btn.Position = UDim2.new(0.5, 0, 0, 26)
 		icons[i] = slot
 	end
@@ -2099,8 +2099,8 @@ local function buildCard(index, team, pop)
 		Size = UDim2.new(0, 96, 0, 70),
 	}, card)
 
-	-- Все три кнопки одного стиля: одинаковая обводка/скругление/градиент, разница только в роли.
-	-- Equip - главный (акцент), Update и X - второстепенные (нейтральные), красный только у Unequip и при подтверждении удаления.
+	-- All three buttons share one style: same outline/corners/gradient, the difference is only in role.
+	-- Equip - primary (accent), Update and X - secondary (neutral), red only for Unequip and delete confirmation.
 	local equipBtn, equipLabel = makeButton(right, {
 		Name = "Equip",
 		Text = "Equip",
@@ -2214,7 +2214,7 @@ local function buildCard(index, team, pop)
 end
 
 ----------------------------------------------------------------------
--- Обновление состояний
+-- State update
 ----------------------------------------------------------------------
 function updateStates()
 	if not drawer or not drawer.Parent then
@@ -2233,7 +2233,7 @@ function updateStates()
 		end
 	end
 
-	-- число команд показывает заголовок окна ("1/20 Teams")
+	-- the team count is shown by the window title ("1/20 Teams")
 	if amountObj and amountObj.Parent then
 		amountNew = ("%d/%d Teams"):format(#teams, CONFIG.MaxTeams)
 		amountObj.Text = amountNew
@@ -2326,10 +2326,10 @@ function rebuild(popIndex, silent)
 end
 
 ----------------------------------------------------------------------
--- Зачистка хвостов старых копий + сборка интерфейса
+-- Cleanup of leftovers from old copies + UI assembly
 ----------------------------------------------------------------------
 pcall(function()
-	-- если прошлая копия оборвалась посреди анимации, Main мог остаться внутри обёртки - возвращаем на место
+	-- if the previous copy was interrupted mid-animation, Main may have stayed inside the wrapper - put it back
 	for _, d in ipairs(invGui:GetDescendants()) do
 		if d.Name == "TeamsMainFade" and d:IsA("CanvasGroup") then
 			local m = d:FindFirstChild("Main")
@@ -2363,7 +2363,7 @@ if dead then
 end
 
 do
-	-- Панель
+	-- Panel
 	drawer = new("CanvasGroup", {
 		Name = "TeamsDrawer",
 		AnchorPoint = Vector2.new(0.5, 0.5),
@@ -2373,12 +2373,12 @@ do
 		BorderSizePixel = 0,
 		GroupTransparency = 1,
 		Visible = false,
-		Active = true, -- пока Main ещё виден под панелью, клики не проходят к петам игры
+		Active = true, -- while Main is still visible under the panel, clicks don't pass through to the game's pets
 		ZIndex = 60,
 	}, frame)
 	created[#created + 1] = drawer
 
-	-- Шапка
+	-- Header
 	local header = new("Frame", {
 		Name = "Header",
 		BackgroundTransparency = 1,
@@ -2386,7 +2386,7 @@ do
 		Size = UDim2.new(1, 0, 0, 52),
 	}, drawer)
 
-	-- выровнена по правому краю кнопок в карточках (Unequip / X)
+	-- aligned to the right edge of the card buttons (Unequip / X)
 	local saveBtn = makeButton(header, {
 		Name = "SaveEquipped",
 		Text = "+ New team",
@@ -2402,7 +2402,7 @@ do
 
 	saveBtn.Activated:Connect(saveEquippedAsTeam)
 
-	-- слева в шапке: какая команда сейчас надета (обычный текст в стиле игры, не кнопка)
+	-- on the left of the header: which team is currently equipped (plain text in the game's style, not a button)
 	activeLabel = label(header, {
 		Name = "Active",
 		Text = "",
@@ -2438,7 +2438,7 @@ do
 		refreshLearnBtn()
 	end
 
-	-- Список
+	-- List
 	list = new("ScrollingFrame", {
 		Name = "List",
 		BackgroundTransparency = 1,
@@ -2462,7 +2462,7 @@ do
 		PaddingLeft = UDim.new(0, 14),
 		PaddingRight = UDim.new(0, SCROLL_EXTRA + 14),
 	}, list)
-	-- полоса прокрутки как у списка петов игры (толщина и картинки берём у настоящей)
+	-- scrollbar like the game's pet list (thickness and images are taken from the real one)
 	pcall(function()
 		local th = math.clamp(petsRoot.ScrollBarThickness, 6, 16)
 		list.ScrollBarThickness = th
@@ -2472,7 +2472,7 @@ do
 		listPad.PaddingRight = UDim.new(0, SCROLL_EXTRA + 14)
 	end)
 
-	refreshLearnBtn() -- подгоняет высоту списка под кнопку Learn
+	refreshLearnBtn() -- fits the list height to the Learn button
 
 	emptyLabel = label(drawer, {
 		Name = "Empty",
@@ -2483,7 +2483,7 @@ do
 		MaxTextSize = 18,
 	})
 
-	-- Тост
+	-- Toast
 	toastGroup = new("CanvasGroup", {
 		Name = "TeamsToast",
 		AnchorPoint = Vector2.new(0.5, 0),
@@ -2511,7 +2511,7 @@ do
 		Text = "",
 	}, toastGroup)
 
-	-- Кнопка открытия
+	-- Open button
 	local function findBar()
 		for _, d in ipairs(invGui:GetDescendants()) do
 			if d.Name == "Lock" and d:IsA("GuiButton") and d.Parent and d.Parent:FindFirstChild("Grid") then
@@ -2557,7 +2557,7 @@ do
 			sc.Name = "ButtonUIScale"
 			sc.Parent = toggleBtn
 
-			-- место под кнопку: двигаем / сжимаем поиск
+			-- room for the button: shift / shrink the search
 			local shrink
 			if hasLayout then
 				local pad = hasLayout.Padding
@@ -2579,7 +2579,7 @@ do
 			if search and search:IsA("GuiObject") then
 				local sp0, ss0 = search:GetAttribute("TeamsOrigPos"), search:GetAttribute("TeamsOrigSize")
 				if typeof(sp0) == "UDim2" and typeof(ss0) == "UDim2" then
-					search.Position, search.Size = sp0, ss0 -- хвост старой копии: возвращаем оригинал
+					search.Position, search.Size = sp0, ss0 -- leftover of an old copy: restore the original
 				end
 				local oldPos, oldSize = search.Position, search.Size
 				search:SetAttribute("TeamsOrigPos", oldPos)
@@ -2662,7 +2662,7 @@ do
 		if env.TeamsEnabled ~= true then
 			return
 		end
-		-- антиспам: пока идёт анимация входа/выхода из вкладки, новые клики игнорируем (и без звука)
+		-- anti-spam: while the tab enter/exit animation runs, ignore new clicks (and no sound)
 		local now = os.clock()
 		if now < drawerLockUntil then
 			return
@@ -2674,7 +2674,7 @@ do
 end
 
 ----------------------------------------------------------------------
--- События
+-- Events
 ----------------------------------------------------------------------
 local function hookSignal(name, fn)
 	local ok, sig = pcall(Library.Signal.Fired, name)
@@ -2703,7 +2703,7 @@ local function queueRefresh()
 end
 
 hookSignal("Pet Equips Changed", queueRefresh)
--- страховка: сейв иногда обновляется без сигнала (Equip Best / Unequip All) - раз в секунду сверяемся
+-- safety net: the save sometimes updates without a signal (Equip Best / Unequip All) - check once a second
 do
 	local alive = true
 	track({ Disconnect = function()
@@ -2732,7 +2732,7 @@ track(invGui:GetPropertyChangedSignal("Enabled"):Connect(function()
 end))
 
 ----------------------------------------------------------------------
--- Выгрузка
+-- Unload
 ----------------------------------------------------------------------
 local function unload()
 	dead = true
@@ -2773,7 +2773,7 @@ end
 env.InventoryTeamsUnload = unload
 
 ----------------------------------------------------------------------
--- Старт
+-- Start
 ----------------------------------------------------------------------
 loadTeams()
 if detectUnequipAll() then
@@ -2783,7 +2783,7 @@ refreshLearnBtn()
 rebuild(nil, true)
 
 ----------------------------------------------------------------------
--- Вкл/выкл через getgenv().TeamsEnabled
+-- On/off via getgenv().TeamsEnabled
 ----------------------------------------------------------------------
 do
 	local enabled = nil
