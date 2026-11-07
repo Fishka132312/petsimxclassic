@@ -832,6 +832,14 @@ UtilSection:Button({
 })
 
 UtilSection:Button({
+	Name = "Serverhop",
+	Tooltip = "Join other server the game",
+	Callback = function()
+		loadstring(game:HttpGet('https://raw.githubusercontent.com/Fishka132312/petsimxclassic/refs/heads/main/Things/Misc/Serverhop.lua'))()
+	end
+})
+
+UtilSection:Button({
 	Name = "Remote Spy",
 	Tooltip = "Opens Remote Spy to watch remote calls",
 	Callback = function()
