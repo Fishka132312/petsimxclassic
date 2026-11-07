@@ -77,10 +77,6 @@ local function warnOnce(key, text)
 	end
 end
 
-local function dbg(...)
-	if CONFIG.Debug then print("[Pets]", ...) end
-end
-
 local function notify(text)
 	pcall(function()
 		StarterGui:SetCore("SendNotification", { Title = "Pets Farm", Text = text, Duration = 6 })
@@ -92,7 +88,6 @@ local function getByPath(root, path)
 	for _, name in ipairs(path) do
 		cur = cur:WaitForChild(name, 5)
 		if not cur then
-			warn("[Pets] Не найден '" .. name .. "' (путь: " .. table.concat(path, ".") .. ")")
 			return nil
 		end
 	end
@@ -191,23 +186,20 @@ local function installHook()
 					then
 						_G.PetRF = self
 						_G.PetRFExtra = table.pack(select(3, ...))
-						task.defer(print, "[Pets] RemoteFunction запомнен")
 					elseif method == "FireServer" and needRE()
 						and n == 2 and type(b) == "string"
 						and string.sub(b, 1, 2) == "id"
 					then
 						_G.PetRE = self
-						task.defer(print, "[Pets] RemoteEvent запомнен")
 					end
 					if not needRF() and not needRE() then
-						task.defer(notify, "Ремоуты сохранены, фарм готов")
+						task.defer(notify, "Farm Ready")
 					end
 				end
 			end
 			return old(self, ...)
 		end))
 	else
-		warn("[Pets] Экзекутор не поддерживает hookmetamethod/newcclosure/checkcaller")
 	end
 end
 
@@ -216,7 +208,6 @@ if not Net.useLibrary then installHook() end
 local function switchToHook(reason)
 	if not Net.useLibrary then return end
 	Net.useLibrary = false
-	warn("[Pets] Library.Network не работает (" .. tostring(reason) .. "), перехожу на перехват ремоутов")
 	installHook()
 end
 
@@ -228,8 +219,7 @@ local function remotesReady()
 	end
 	if not warned.learn then
 		warned.learn = true
-		warn("[Pets] Кликни вручную по монете и подожди, пока петы начнут бить")
-		notify("Кликни по монете один раз и подожди пару секунд")
+		notify("Send ur pets on breakable")
 	end
 	return false
 end
@@ -420,7 +410,6 @@ local function sendPets(coin, a, pets, isExtra)
 		end
 
 		if CONFIG.Debug then
-			print(string.format("[Pets] монета %s: отправлено %d -> принято %d %s",
 				a.id, #pets, #acc, reason and ("(" .. reason .. ")") or ""))
 		end
 
@@ -509,7 +498,6 @@ end
 function PetController.Distribute(locations)
 	local pets = GetEquippedPets()
 	if #pets == 0 then
-		warnOnce("nopets", "[Pets] Не найдено петов с Owner = " .. LocalPlayer.Name)
 		return
 	end
 
@@ -669,7 +657,7 @@ local function loop(id, interval, fn, label)
 	task.spawn(function()
 		while AutoFarm.Enabled and runId == id do
 			local ok, err = pcall(fn)
-			if not ok then warn("[Pets] Ошибка (" .. label .. "): " .. tostring(err)) end
+			if not ok then end
 			task.wait(interval)
 		end
 	end)
@@ -698,7 +686,7 @@ function AutoFarm.Start(locations)
 			pending = false
 			if AutoFarm.Enabled and runId == id then
 				local ok, err = pcall(PetController.Distribute, AutoFarm.Location)
-				if not ok then warn("[Pets] Ошибка (быстрое назначение): " .. tostring(err)) end
+				if not ok then end
 			end
 		end)
 	end
@@ -722,7 +710,6 @@ function AutoFarm.Start(locations)
 		loop(id, CONFIG.StatsInterval, function()
 			local n = 0
 			for _ in pairs(assignments) do n += 1 end
-			print(string.format("[Pets] принято=%d, отклонено=%d, макс.дист=%d, радиус=%s, монет в работе=%d, режим ударов=%s",
 				stats.accepted, stats.rejected, math.floor(stats.maxDist),
 				tostring(Radius.current and math.floor(Radius.current) or "-"), n,
 				Learn.needRepeat and "постоянный" or "авто"))
@@ -753,7 +740,3 @@ _G.PetTools = {
 		table.clear(CoinManager.Connections)
 	end,
 }
-
-print(Net.useLibrary
-	and "[Pets] Готово (через Library.Network). Вызови _G.PetTools.AutoFarm.Start(...)"
-	or "[Pets] Готово. Кликни по монете вручную, дождись 'RemoteFunction запомнен' и 'RemoteEvent запомнен'")
