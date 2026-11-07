@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------уцуй
+--------------------------------------------------------------------------------вф
 -- CONFIG
 --------------------------------------------------------------------------------
 local CONFIG = {
@@ -10,7 +10,8 @@ local CONFIG = {
 	AfkRetryWait     = 0.05, -- AFK+TP: pause between attempts at the egg
 	AfkStartWait     = 1,    -- AFK+TP: max wait for the animation-start signal after a purchase
 	AfkMinCycle      = 0.4,  -- AFK+TP: minimum time of one full cycle (egg -> buy -> home). Needed with No Egg Animation, where the game's cooldown is ~0 and the teleports get too fast. Lower = faster
-	AfkCooldownCap   = 0.5,  -- AFK+TP: wait for the animation at Home at most this long, then go to the egg anyway (the game lets you buy earlier than the animation ends). Lower = faster, but more failed attempts
+	AfkCooldownMax   = 25,   -- AFK+TP: max wait for the egg-opening animation to finish
+	AfkEarlyBy       = 0.15, -- AFK+TP: go back to the egg this many seconds BEFORE the animation ends (measured from the previous animation). 0 = wait for the very end, higher = faster but may fail more often
 	AfkEggOffset     = Vector3.new(0, 3, 6), -- AFK+TP: where to stand relative to the egg center
 }
 
@@ -307,6 +308,7 @@ end
 -- We count "Opening Egg" (start) and "Done Opening Egg" (end) signals, so even an
 -- instant animation can't be missed and an OLD animation can't be mistaken for ours.
 local startCount, doneCount = 0, 0
+local animStart, animDuration = nil, nil -- when the current animation started / how long the last one took
 local signalsHooked = false
 local function hookSignals()
 	local lib = getLib()
@@ -314,10 +316,16 @@ local function hookSignals()
 	local gen = _G.EggToolsGen
 	local ok = pcall(function()
 		lib.Signal.Fired("Opening Egg"):Connect(function()
-			if _G.EggToolsGen == gen then startCount = startCount + 1 end
+			if _G.EggToolsGen == gen then
+				startCount = startCount + 1
+				animStart = os.clock()
+			end
 		end)
 		lib.Signal.Fired("Done Opening Egg"):Connect(function()
-			if _G.EggToolsGen == gen then doneCount = doneCount + 1 end
+			if _G.EggToolsGen == gen then
+				doneCount = doneCount + 1
+				if animStart then animDuration = os.clock() - animStart end
+			end
 		end)
 	end)
 	if ok then signalsHooked = true end
@@ -339,20 +347,32 @@ end
 
 local RunService = game:GetService("RunService")
 
--- After a successful purchase: wait for OUR animation to start, then for it to finish,
--- but no longer than AfkCooldownCap (the game accepts the next purchase before the animation ends).
+-- Wait while an animation is running, but leave AfkEarlyBy seconds before the expected end
+-- (expected = how long the previous animation took).
+local function waitAnimEnd(alive)
+	local t = os.clock()
+	while animActive() and alive() and os.clock() - t < CONFIG.AfkCooldownMax do
+		if animStart and animDuration and os.clock() - animStart >= animDuration - CONFIG.AfkEarlyBy then
+			break
+		end
+		RunService.Heartbeat:Wait()
+	end
+end
+
+-- After a successful purchase: wait for OUR animation to start, then (almost) to finish.
+-- `startBefore` = startCount right before the purchase call.
 local function waitCooldown(startBefore, token)
 	local t = os.clock()
 	local function alive() return AutoOpen.Enabled and AutoOpen.Token == token end
-	local function left() return CONFIG.AfkCooldownCap - (os.clock() - t) end
 	if signalsHooked then
-		while startCount <= startBefore and not isOpening() and left() > 0 and alive() do
+		while startCount <= startBefore and not isOpening()
+			and os.clock() - t < 1 and alive() do
 			RunService.Heartbeat:Wait()
 		end
+	else
+		task.wait(0.15)
 	end
-	while animActive() and left() > 0 and alive() do
-		RunService.Heartbeat:Wait()
-	end
+	waitAnimEnd(alive)
 end
 
 local function goHome()
@@ -389,10 +409,7 @@ local function afkOpenOnce(eggId, amount, token)
 
 	-- a previous animation still running? give it a moment while we are still at Home
 	if animActive() then
-		local t = os.clock()
-		while animActive() and os.clock() - t < CONFIG.AfkCooldownCap and alive() do
-			RunService.Heartbeat:Wait()
-		end
+		waitAnimEnd(alive)
 		if not alive() then return false, "stopped" end
 	end
 
