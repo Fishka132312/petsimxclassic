@@ -660,26 +660,12 @@ EggSection:Toggle({
 
 EggSection:Toggle({
 	Name = "AFK + TP",
-	Tooltip = "Stay at your saved spot; hop to the egg only to buy, then return and wait for the cooldown",
+	Tooltip = "Remembers where you stand when turned on; hops to the egg only to buy, then returns and waits for the cooldown",
 	Flag = "EggAfkTp",
 	Default = false,
 	Callback = function(Value)
 		local tools = _G.EggTools
-		if tools then tools.AutoOpen.Afk = Value end
-	end
-})
-
-EggSection:Button({
-	Name = "Set AFK spot here",
-	Tooltip = "Saves your current position as the spot to return to",
-	Callback = function()
-		local tools = _G.EggTools
-		local ok = tools and tools.SetHome()
-		Library:Notification({
-			Title = "Eggs",
-			Description = ok and "AFK spot saved" or "Character not ready",
-			Duration = 3
-		})
+		if tools then tools.SetAfk(Value) end
 	end
 })
 
