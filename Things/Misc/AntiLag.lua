@@ -459,7 +459,6 @@ local function scan()
         handle(obj)
         if i % CFG.BATCH == 0 then RunService.Heartbeat:Wait() end
     end
-    print(("Анти-лаг: очистка завершена (%d объектов)"):format(#list))
 end
 
 task.spawn(function()
@@ -472,7 +471,6 @@ task.spawn(function()
         elseif not want and active then
             active = false
             revertAll(false)
-            print("Анти-лаг выключен: всё возвращено")
         end
         task.wait(0.2)
     end
@@ -486,5 +484,3 @@ _G[CLEANUP] = function()
     table.clear(connections)
     revertAll(true)
 end
-
-print(("Анти-лаг загружен. Включить: _G.%s = true, выключить: _G.%s = false"):format(FLAG, FLAG))
