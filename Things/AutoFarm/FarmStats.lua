@@ -245,5 +245,3 @@ task.spawn(function()
 		task.wait(0.2)
 	end
 end)
-
-print(("[StatsFarm] загружен, подсчёт идёт. Показать GUI: _G.%s = true, спрятать: _G.%s = false"):format(FLAG, FLAG))
