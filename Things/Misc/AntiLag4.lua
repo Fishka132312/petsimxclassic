@@ -47,7 +47,6 @@ local DISABLE_COIN_FX      = true   -- выключить частицы/све�
 local KILL_HIT_PARTICLES   = true   -- убрать частицы удара/взрыва коинов (клоны шаблонов из Assets.Particles)
 local MUTE_COIN_SOUNDS     = true   -- глушить звуки ударов/падения/разрушения коинов
 local BATCH                = 300    -- объектов за кадр при откате
-local DEBUG                = false
 --==========================================--
 
 local CoinsFolder = Library.Things:WaitForChild("Coins", 15)
@@ -315,18 +314,6 @@ local function startSession()
             end
         end
     end)
-
-    if DEBUG then
-        task.spawn(function()
-            while ok() do
-                task.wait(5)
-                local total = 0
-                for _ in pairs(info) do total += 1 end
-                    total, nStored, #CoinsFolder:GetChildren()))
-            end
-        end)
-    end
-
 end
 
 local function stopSession()
