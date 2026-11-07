@@ -6,7 +6,6 @@ local CONFIG = {
 	MaxFailures      = 5,  -- столько неудач подряд -> автооткрытие останавливается
 	FailDelay        = 1,  -- пауза после неудачной покупки
 	RescanInterval   = 15, -- как часто пересканировать яйца на карте
-	Debug            = false,
 }
 
 --------------------------------------------------------------------------------
@@ -96,8 +95,6 @@ if not env.__EggHookV2 then
 			end
 			return oldNamecall(self, ...)
 		end))
-	else
-		warn("[Eggs] Executor doesnt support hookmetamethod")
 	end
 end
 
@@ -287,8 +284,6 @@ function AutoOpen.Start(eggId, amount)
 	if not AutoOpen.Egg then
 		return
 	end
-	if not EggTools.IsLearned() then
-	end
 
 	local token = {}
 	AutoOpen.Token = token
@@ -323,14 +318,10 @@ function AutoOpen.Start(eggId, amount)
 			if ok then
 				fails = 0
 				AutoOpen.Opened = AutoOpen.Opened + (tonumber(amountNow) or 1)
-				log("открыто: " .. tostring(AutoOpen.Opened))
 				task.wait(math.max(0.05, AutoOpen.Delay))
 			else
 				fails = fails + 1
 				local text = tostring(msg)
-				local egg, _, dist = nearestEgg(id)
-					fails, CONFIG.MaxFailures, text,
-					(egg and dist) and string.format("%.1f", dist) or "?"))
 				if fails >= CONFIG.MaxFailures then
 					AutoOpen.Enabled = false
 					notify("Stopped: " .. text)
@@ -488,7 +479,6 @@ local function installNoAnim()
 		env.__NoEggAnimInstalled = method
 		NoAnim.Installed = true
 		NoAnim.Method = method
-	else
 	end
 end
 
