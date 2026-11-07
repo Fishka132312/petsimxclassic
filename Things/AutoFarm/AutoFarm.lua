@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------вв
+--------------------------------------------------------------------------------олн
 -- AUTOFARM v2 + выбор типов монет (AutoFarm.SetCoinTypes)в
 -- Changes compared to the old version (based on the game's Coins/Pets/Select Pets scripts):
 --  1. Remotes are called through the game's own Library.Network ("Join Coin" / "Farm Coin"),
@@ -641,7 +641,7 @@ function PetController.Distribute(locations)
 
 	-- 3) pet <-> coin: for each coin (nearest first) take the closest free pet
 	local idx = 0
-	local perCoin = math.max(1, CONFIG.PetsPerCoin)
+	local perCoin = math.max(1, math.floor(CONFIG.PetsPerCoin))
 	for _, item in ipairs(targets) do
 		if #free == 0 then break end
 		local group = {}
@@ -720,11 +720,12 @@ local AutoFarm = { Enabled = false, Location = nil }
 local farmConnections = {}
 local runId = 0
 
-local function loop(id, interval, fn)
+-- key = имя поля в CONFIG: интервал читается каждый цикл, поэтому слайдеры в GUI работают на лету
+local function loop(id, key, fn)
 	task.spawn(function()
 		while AutoFarm.Enabled and runId == id do
 			pcall(fn)
-			task.wait(interval)
+			task.wait(math.max(0.01, tonumber(CONFIG[key]) or 0.2))
 		end
 	end)
 end
@@ -738,10 +739,10 @@ function AutoFarm.Start(locations)
 	PetController.Reset()
 	learnNotified = false
 
-	loop(id, CONFIG.LoopInterval, function()
+	loop(id, "LoopInterval", function()
 		PetController.Distribute(AutoFarm.Location)
 	end)
-	loop(id, CONFIG.HitInterval, hitAll)
+	loop(id, "HitInterval", hitAll)
 
 	-- coin broken/spawned -> reassign right away, don't wait for the loop
 	local pending = false
