@@ -30,10 +30,10 @@ local CONFIG = {
 	IdAttr       = "ID",
 	OwnerAttr    = "Owner",
 
-	SearchRadius   = "auto", -- "auto" | number | math.huge (unlimited)
+	SearchRadius   = math.huge, -- "auto" | number | math.huge (unlimited). Как в старом фарме: все монеты на карте
 	ProbeInterval  = 15,     -- every N sec try a coin farther than the current radius
 	ProbeFactor    = 1.5,    -- how many times farther to probe
-	RequireLanded  = true,   -- only take coins that have landed
+	RequireLanded  = false,  -- only take coins that have landed (false = как в старом фарме)
 
 	PetsPerCoin    = 1,      -- initial number of pets per coin
 	MaxPetsPerCoin = 100,    -- cap when adding extra pets
@@ -291,7 +291,7 @@ end
 local function coinUsable(coin)
 	if not coin.Parent then return false end
 	if coin:GetAttribute("IsFalling") == true then return false end
-	if CONFIG.RequireLanded and coin:GetAttribute("HasLanded") ~= true then return false end
+	if CONFIG.RequireLanded and coin:GetAttribute("HasLanded") == false then return false end
 	local hp = coin:GetAttribute("Health")
 	if hp ~= nil and hp <= 0 then return false end
 	local model = coin:FindFirstChild("Coin")
@@ -352,7 +352,7 @@ end
 -- [coin] = { id, pets (accepted), pending (sent, awaiting reply), accepted,
 --            assignedAt, lastHealth, lastProgress, started, quiet }
 local assignments = {}
-local Learn = { stalls = 0, needRepeat = false } -- self-learning hit mode
+local Learn = { stalls = 0, needRepeat = true } -- true = бить постоянно, как в старой версии
 local Radius = { current = nil, lastProbe = 0 }
 
 local function baseRadius()
