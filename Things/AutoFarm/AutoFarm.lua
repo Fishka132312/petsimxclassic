@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------олн
+--------------------------------------------------------------------------------вв
 -- AUTOFARM v2 + выбор типов монет (AutoFarm.SetCoinTypes)в
 -- Changes compared to the old version (based on the game's Coins/Pets/Select Pets scripts):
 --  1. Remotes are called through the game's own Library.Network ("Join Coin" / "Farm Coin"),
@@ -641,7 +641,7 @@ function PetController.Distribute(locations)
 
 	-- 3) pet <-> coin: for each coin (nearest first) take the closest free pet
 	local idx = 0
-	local perCoin = math.max(1, math.floor(CONFIG.PetsPerCoin))
+	local perCoin = math.min(#pets, math.max(1, math.floor(tonumber(CONFIG.PetsPerCoin) or 1)))
 	for _, item in ipairs(targets) do
 		if #free == 0 then break end
 		local group = {}
@@ -723,8 +723,13 @@ local runId = 0
 -- key = имя поля в CONFIG: интервал читается каждый цикл, поэтому слайдеры в GUI работают на лету
 local function loop(id, key, fn)
 	task.spawn(function()
+		local lastErr
 		while AutoFarm.Enabled and runId == id do
-			pcall(fn)
+			local ok, err = pcall(fn)
+			if not ok and err ~= lastErr then
+				lastErr = err
+				warn("[Pets] ошибка в цикле " .. key .. ": " .. tostring(err))
+			end
 			task.wait(math.max(0.01, tonumber(CONFIG[key]) or 0.2))
 		end
 	end)
@@ -783,6 +788,16 @@ end
 
 function AutoFarm.SetLocation(locations)
 	AutoFarm.Location = locations
+end
+
+-- то же самое, что выключить и включить чекбокс: сброс назначений и отказов, новые циклы.
+-- GUI вызывает это после любой смены настроек, чтобы фарм не "залипал".
+function AutoFarm.Restart()
+	if not AutoFarm.Enabled then return end
+	local loc = AutoFarm.Location
+	AutoFarm.Stop()
+	table.clear(CoinManager.Rejected)
+	AutoFarm.Start(loc)
 end
 
 -- types: nil / {} = ломать все типы
@@ -853,6 +868,7 @@ function AutoFarm.SetCoinTypes(types)
 end
 
 _G.PetTools = {
+	GetPetCount = function() return #GetEquippedPets() end, -- сколько петов сейчас экипировано
 	CoinManager = CoinManager,
 	PetController = PetController,
 	AutoFarm = AutoFarm,
