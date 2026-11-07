@@ -91,7 +91,6 @@ if MUTE_SOUNDS then
 	if ok then
 		restoreFns[#restoreFns + 1] = function() Library.Audio.Play = origPlay end
 	else
-		warn("[Magnet] Не удалось пропатчить Audio.Play")
 	end
 end
 
@@ -252,7 +251,6 @@ if DEBUG then
 	task.spawn(function()
 		while alive do
 			task.wait(5)
-			print(string.format("[Magnet] включён=%s | орбов притянуто: %d | мешков притянуто: %d",
 				tostring(enabled()), stats.orbs, stats.bags))
 		end
 	end)
@@ -267,5 +265,3 @@ _G.MagnetCleanup = function()
 	for _, fn in ipairs(restoreFns) do pcall(fn) end
 	table.clear(restoreFns)
 end
-
-print("[Magnet] запущен. _G.AutoCollectOrbsLootbags = " .. tostring(enabled()))
