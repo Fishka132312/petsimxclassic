@@ -9,9 +9,9 @@
     SurfaceAppearance и одежда других игроков не удаляются, а временно снимаются (Parent = nil)
     и при выключении возвращаются на место.
     Повторный запуск скрипта сначала выгружает прошлую копию и откатывает её изменения.
+    RenderFidelity скрипт не трогает вообще (из-за ошибки "Cannot change SolidModel RenderFidelity").
 ]]
 
--- Имя переменной-переключателя. Если у тебя несколько анти-лагов, поставь в каждом своё.
 local FLAG = "AntiLagEnabled"
 
 local CLEANUP = FLAG .. "_Cleanup"
@@ -20,7 +20,7 @@ if _G[CLEANUP] then
     _G[CLEANUP] = nil
 end
 if _G[FLAG] == nil then
-    _G[FLAG] = false -- по умолчанию выключен. Хочешь, чтобы включался сам при запуске — поставь true
+    _G[FLAG] = false -- по умолчанию выключен. Хочешь, чтобы включался сам — поставь true
 end
 
 local function enabled()
@@ -69,20 +69,19 @@ local EFFECTS  = { "ParticleEmitter", "Trail", "Beam", "Fire", "Smoke", "Sparkle
 local LIGHTS   = { "PointLight", "SpotLight", "SurfaceLight" }
 local CLOTHES  = { "Shirt", "Pants", "ShirtGraphic" }
 
--- Свойства, которые нельзя менять на лету: для них не используем sethiddenproperty,
--- иначе движок спамит "Cannot change ... during Run-Time"
-local NO_HIDDEN = { RenderFidelity = true }
+-- Свойства, которые скрипт не трогает НИКОГДА (нельзя менять в рантайме)
+local BLOCKED_PROPS = { RenderFidelity = true }
 
 -- ================== СОСТОЯНИЕ ==================
 local alive, active = true, false
 local connections = {}
 
-local saved     = setmetatable({}, { __mode = "k" }) -- [obj] = { [prop] = исходное значение }
-local processed = setmetatable({}, { __mode = "k" })
-local enforced  = setmetatable({}, { __mode = "k" })
-local removed   = {}   -- { obj, parent } снятые объекты
-local envSaved  = {}   -- { inst, prop, value, hidden } освещение, террейн, настройки
-local failedProps = {} -- ["ClassName.Prop"] = true — свойство у этого класса не меняется, больше не пробуем
+local saved       = setmetatable({}, { __mode = "k" }) -- [obj] = { [prop] = исходное значение }
+local processed   = setmetatable({}, { __mode = "k" })
+local enforced    = setmetatable({}, { __mode = "k" })
+local removed     = {}   -- { obj, parent } снятые объекты
+local envSaved    = {}   -- { inst, prop, value, hidden } освещение, террейн, настройки
+local failedProps = {}   -- ["ClassName.Prop"] = true — не меняется, больше не пробуем
 local fpsOriginal
 local queue, running = {}, false
 
@@ -94,26 +93,21 @@ local function isAny(obj, list)
     return false
 end
 
+-- Запись свойства объекта: только обычное присваивание, без sethiddenproperty
 local function setProp(obj, prop, value)
+    if BLOCKED_PROPS[prop] then return false end
     local key = obj.ClassName .. "." .. prop
     if failedProps[key] then return false end
 
     local ok = pcall(function() obj[prop] = value end)
-    if not ok and sethiddenproperty and not NO_HIDDEN[prop] then
-        ok = pcall(sethiddenproperty, obj, prop, value)
-    end
-    if not ok then
-        failedProps[key] = true
-    end
+    if not ok then failedProps[key] = true end
     return ok
 end
 
--- поставить значение, запомнив исходное (только при первом изменении и только если запись удалась)
+-- Поставить значение, запомнив исходное (только если запись удалась)
 local function setSaved(obj, prop, value)
+    if BLOCKED_PROPS[prop] then return false end
     local ok, cur = pcall(function() return obj[prop] end)
-    if not ok and gethiddenproperty and not NO_HIDDEN[prop] then
-        ok, cur = pcall(gethiddenproperty, obj, prop)
-    end
     if ok and cur == value then return true end
 
     if not setProp(obj, prop, value) then return false end
@@ -129,8 +123,9 @@ local function setSaved(obj, prop, value)
     return true
 end
 
--- то же для не-объектов мира (Lighting, Terrain, settings)
+-- То же для Lighting, Terrain, settings
 local function keepProp(inst, prop, value, hidden)
+    if BLOCKED_PROPS[prop] then return end
     local ok, cur
     if hidden and gethiddenproperty then
         ok, cur = pcall(gethiddenproperty, inst, prop)
@@ -149,7 +144,7 @@ end
 -- Безопасное снятие (не уничтожение): защищённые классы не трогает никогда
 local function detach(obj)
     if isAny(obj, PROTECTED) then return end
-    if obj:FindFirstChildWhichIsA("BasePart", true) then return end -- внутри есть парты — не трогаем
+    if obj:FindFirstChildWhichIsA("BasePart", true) then return end
     local parent = obj.Parent
     if not parent then return end
     removed[#removed + 1] = { obj = obj, parent = parent }
@@ -165,7 +160,7 @@ local function isMyCharacter(obj)
     return char ~= nil and obj:IsDescendantOf(char)
 end
 
--- Быстрая проверка персонажа другого игрока (без цикла по всем игрокам)
+-- Быстрая проверка персонажа другого игрока
 local function getOtherPlayerOf(obj)
     local model = obj:FindFirstAncestorOfClass("Model")
     while model do
@@ -197,11 +192,11 @@ local function enforce(obj, prop)
             local cur = obj[prop]
             if cur ~= "" then
                 local s = saved[obj]
-                if s then s[prop] = cur end -- игра поставила новое значение: к нему и откатимся
+                if s then s[prop] = cur end
                 setProp(obj, prop, "")
             end
         end)
-        connections[#connections + 1] = conn -- чтобы отключалось при выгрузке
+        connections[#connections + 1] = conn
     end)
 end
 
@@ -214,10 +209,6 @@ local function stripMeshPart(part)
     if shouldClearMesh(part) then
         setSaved(part, "MeshId", "")
         enforce(part, "MeshId")
-    end
-    -- RenderFidelity только у настоящих MeshPart (у юнионов/SolidModel нельзя менять на лету)
-    if part.ClassName == "MeshPart" then
-        setSaved(part, "RenderFidelity", Enum.RenderFidelity.Performance)
     end
     if CFG.SIMPLE_PHYSICS then
         setSaved(part, "CollisionFidelity", Enum.CollisionFidelity.Box)
@@ -236,12 +227,10 @@ local function stripPart(part, coin)
         setSaved(part, "MaterialVariant", "")
         if isMesh then
             stripMeshPart(part)
-        elseif CFG.SIMPLE_PHYSICS and part:IsA("PartOperation") then
-            setSaved(part, "CollisionFidelity", Enum.CollisionFidelity.Box)
         end
     end
 
-    if ((isMesh or part:IsA("PartOperation")) and CFG.HIDE_ALL_MESHES) or (coin and CFG.HIDE_COINS) then
+    if (isMesh and CFG.HIDE_ALL_MESHES) or (coin and CFG.HIDE_COINS) then
         setSaved(part, "LocalTransparencyModifier", 1)
         setSaved(part, "Transparency", 1)
     end
@@ -258,19 +247,16 @@ end
 local function optimize(obj)
     if isMyCharacter(obj) then return end
 
-    -- Парты: только визуал
     if obj:IsA("BasePart") then
         stripPart(obj, isCoin(obj))
         return
     end
 
-    -- GUI в мире и 3D-адорнменты
     if obj:IsA("LayerCollector") or obj:IsA("GuiBase3d") then
         if CFG.DISABLE_GUI then disableGui(obj) end
         return
     end
 
-    -- SpecialMesh / FileMesh
     if obj:IsA("FileMesh") then
         if CFG.CLEAR_TEXTURES then
             setSaved(obj, "TextureId", "")
@@ -293,7 +279,7 @@ local function optimize(obj)
     elseif CFG.REMOVE_LIGHTS and isAny(obj, LIGHTS) then
         setSaved(obj, "Enabled", false)
         setSaved(obj, "Shadows", false)
-    elseif CFG.REMOVE_DECALS and obj:IsA("Decal") then -- Texture тоже наследует Decal
+    elseif CFG.REMOVE_DECALS and obj:IsA("Decal") then
         setSaved(obj, "Transparency", 1)
     elseif CFG.REMOVE_SURFACE_APPEARANCE and obj:IsA("SurfaceAppearance") then
         detach(obj)
@@ -301,7 +287,6 @@ local function optimize(obj)
         if isAny(obj, CLOTHES) then
             detach(obj)
         end
-        -- Аксессуары не снимаем (внутри Handle-парт), они станут прозрачными через Handle ниже
     elseif CFG.MUTE_SOUNDS and obj:IsA("Sound") then
         setSaved(obj, "Volume", 0)
     end
@@ -326,7 +311,7 @@ end
 -- ================== ОСВЕЩЕНИЕ ==================
 local function fixLighting(v)
     if v:IsA("PostEffect") then
-        setSaved(v, "Enabled", false)  -- Bloom, Blur, ColorCorrection, SunRays, DoF
+        setSaved(v, "Enabled", false)
     elseif v:IsA("Clouds") then
         setSaved(v, "Enabled", false)
     elseif v:IsA("Atmosphere") then
@@ -376,9 +361,7 @@ local function applyLighting()
 end
 
 -- ================== ОТКАТ ==================
--- sync = true: без пауз между кадрами (используется при выгрузке скрипта)
 local function revertAll(sync)
-    -- свойства объектов
     local list = {}
     for obj in pairs(saved) do list[#list + 1] = obj end
     for i, obj in ipairs(list) do
@@ -392,7 +375,6 @@ local function revertAll(sync)
         if not sync and i % CFG.BATCH == 0 then RunService.Heartbeat:Wait() end
     end
 
-    -- снятые объекты (SurfaceAppearance, одежда)
     for i = #removed, 1, -1 do
         local r = removed[i]
         removed[i] = nil
@@ -401,7 +383,6 @@ local function revertAll(sync)
         end
     end
 
-    -- освещение, террейн, настройки (в обратном порядке)
     for i = #envSaved, 1, -1 do
         local e = envSaved[i]
         local inst, prop, val, hidden = e[1], e[2], e[3], e[4]
@@ -428,7 +409,6 @@ if CFG.LIGHTING_OPT then
         if alive and active then task.defer(fixLighting, v) end
     end)
 
-    -- Эффекты на камере (Blur и т.п. иногда кладут туда)
     local cam = workspace.CurrentCamera
     if cam then
         connections[#connections + 1] = cam.ChildAdded:Connect(function(v)
@@ -437,7 +417,6 @@ if CFG.LIGHTING_OPT then
     end
 end
 
--- Новые объекты (с очередью, чтобы не лагало при массовом спавне)
 connections[#connections + 1] = workspace.DescendantAdded:Connect(function(obj)
     if not (alive and active) then return end
     table.insert(queue, obj)
@@ -480,6 +459,7 @@ local function scan()
         handle(obj)
         if i % CFG.BATCH == 0 then RunService.Heartbeat:Wait() end
     end
+    print(("Анти-лаг: очистка завершена (%d объектов)"):format(#list))
 end
 
 task.spawn(function()
@@ -492,6 +472,7 @@ task.spawn(function()
         elseif not want and active then
             active = false
             revertAll(false)
+            print("Анти-лаг выключен: всё возвращено")
         end
         task.wait(0.2)
     end
@@ -505,3 +486,5 @@ _G[CLEANUP] = function()
     table.clear(connections)
     revertAll(true)
 end
+
+print(("Анти-лаг загружен. Включить: _G.%s = true, выключить: _G.%s = false"):format(FLAG, FLAG))
