@@ -37,6 +37,7 @@ local MUTE_CURRENCY_FX = true   -- убрать вылетающую валют�
 local alive = true
 local connections = {}
 local restoreFns = {}
+local stats = { orbs = 0, bags = 0 }
 
 local function connect(signal, fn)
 	local c = signal:Connect(fn)
@@ -182,6 +183,7 @@ local Orbs = Library.Things:WaitForChild("Orbs")
 local function onOrb(part)
 	if not part:IsA("BasePart") or tracked[part] then return end
 	strip(part)
+	stats.orbs += 1
 	follow(part, -2) -- оригинал меряет дистанцию до pos + (0,2,0)
 end
 
@@ -208,6 +210,7 @@ local function onBag(part)
 
 	local function tryFollow()
 		if enabled() and not tracked[part] and bagReady(part) then
+			stats.bags += 1
 			follow(part, 0)
 		end
 	end
