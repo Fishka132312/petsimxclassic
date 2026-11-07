@@ -84,10 +84,6 @@ local conns = {}             -- подключения текущей сесси
 local saved = setmetatable({}, { __mode = "k" }) -- [obj] = { [prop] = исходное значение }
 local removed = {}           -- { obj, parent, valid } убранные объекты
 
-local function log(...)
-    if CFG.LOG then print("[AntiLag2]", ...) end
-end
-
 local function track(conn)
     conns[#conns + 1] = conn
     return conn
@@ -335,5 +331,3 @@ _G[CLEANUP] = function()
     table.clear(conns)
     revertAll(true)
 end
-
-print(("Антилаг 2 загружен. Включить: _G.%s = true, выключить: _G.%s = false"):format(FLAG, FLAG))
