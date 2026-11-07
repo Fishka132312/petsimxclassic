@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------ккув
+--------------------------------------------------------------------------------вв
 -- AUTOFARM v2 + выбор типов монет (AutoFarm.SetCoinTypes)в
 -- Changes compared to the old version (based on the game's Coins/Pets/Select Pets scripts):
 --  1. Remotes are called through the game's own Library.Network ("Join Coin" / "Farm Coin"),
@@ -21,8 +21,7 @@
 --  8. Coins with Health <= 0 are released immediately, TravelGrace is shortened.
 --
 -- Usage: AutoFarm.Start(locations) / AutoFarm.Stop() / AutoFarm.SetLocation(...)
---        AutoFarm.SetCoinTypes({ "Chests", "Diamonds", ... })  -- какие группы монет ломать (пусто/nil = все)
---        AutoFarm.SetChestSizes({ "Small", "Medium", "Large" }) -- размер сундуков (только для группы Chests; пусто/nil = все размеры)
+--        AutoFarm.SetCoinTypes({ "Small Chests", "Large Chests", "Diamonds", ... })  -- какие группы монет ломать (пусто/nil = все)
 --        CoinManager.GetCoinTypes()              -- список групп: Coins, Chests, Safes, Vaults + найденные (Diamonds, Presents...)
 --        CoinManager.PrintTypes()                -- напечатать в консоль группы, какие монеты в них попали и сколько их на карте
 --------------------------------------------------------------------------------
@@ -118,7 +117,7 @@ local function coinTypeName(coin)
 end
 
 -- фильтр групп монет: groups = { [normKey] = true } или nil (ломаем все группы).
--- Группы: Coins, Chests, Safes, Vaults + то, что нашлось на карте (Diamonds, Presents, ...).
+-- Группы: Coins, Small Chests, Medium Chests, Large Chests, Safes, Vaults + то, что нашлось на карте (Diamonds, Presents, ...).
 local TypeFilter = { groups = nil }
 
 -- locations: nil (all) | "Name" | { "Name1", "Name2" } | { Name1 = true, ... }
@@ -333,7 +332,7 @@ end
 --   2) по категории игры (landSound): coin -> Coins, chest -> Chests, safe -> Safes, vault -> Vaults;
 --   3) любая другая категория игры становится отдельной группой с её названием (lucky_block -> "Lucky Block");
 --   4) если игровой Directory недоступен - угадываем по названию, иначе "Other".
-local BASE_GROUPS = { "Coins", "Chests", "Safes", "Vaults" } -- есть в списке всегда
+local BASE_GROUPS = { "Coins", "Small Chests", "Medium Chests", "Large Chests", "Safes", "Vaults" } -- есть в списке всегда
 local BASE_SET = {}
 for _, g in ipairs(BASE_GROUPS) do BASE_SET[g] = true end
 
@@ -363,7 +362,54 @@ end
 local groupCache = {}  -- [полное название монеты] = { name, key }
 local knownGroups = {} -- дополнительные группы, которые уже встречались на карте (остаются в списке)
 
-local function classify(typeName)
+-- ===== РАЗМЕР СУНДУКОВ =====
+-- 1) по словам в названии: Mini/Tiny/Small, Medium, Large/Big/Huge/Giant/Mega;
+-- 2) если слов нет - по максимальному здоровью: самые слабые = Small, самые крепкие = Large.
+local SIZE_WORDS = {
+	{ "mini", "Small" }, { "tiny", "Small" }, { "small", "Small" },
+	{ "medium", "Medium" },
+	{ "large", "Large" }, { "big", "Large" }, { "huge", "Large" }, { "giant", "Large" }, { "mega", "Large" },
+}
+local chestHp = {}     -- [название сундука без слов-размеров] = макс. увиденное здоровье
+local sizeByHp = {}    -- [название] = "Small" | "Medium" | "Large"
+local sizeDirty = false
+
+local function rebuildHpSizes()
+	sizeDirty = false
+	table.clear(sizeByHp)
+	local list = {}
+	for tn, hp in pairs(chestHp) do list[#list + 1] = { name = tn, hp = hp } end
+	table.sort(list, function(a, b) return a.hp < b.hp end)
+	local n = #list
+	for i, e in ipairs(list) do
+		local size = "Medium"
+		if n > 1 then
+			local r = (i - 1) / (n - 1)
+			size = r < 0.34 and "Small" or (r > 0.66 and "Large" or "Medium")
+		end
+		sizeByHp[e.name] = size
+	end
+end
+
+local function chestGroup(typeName, coin)
+	local l = typeName:lower()
+	for _, rule in ipairs(SIZE_WORDS) do
+		if l:find(rule[1], 1, true) then return rule[2] .. " Chests" end
+	end
+	local hp = coin and coin:GetAttribute("Health")
+	if type(hp) ~= "number" then hp = nil end
+	if chestHp[typeName] == nil then
+		chestHp[typeName] = hp or 0
+		sizeDirty = true
+	elseif hp and hp > chestHp[typeName] then
+		chestHp[typeName] = hp
+		sizeDirty = true
+	end
+	if sizeDirty then rebuildHpSizes() end
+	return (sizeByHp[typeName] or "Medium") .. " Chests"
+end
+
+local function classify(typeName, coin)
 	local cached = groupCache[typeName]
 	if cached then return cached end
 
@@ -383,85 +429,26 @@ local function classify(typeName)
 		else group = "Other" end
 	end
 
+	if group == "Chests" then -- размер может поменяться по мере появления данных: не кэшируем
+		group = chestGroup(typeName, coin)
+		return { name = group, key = normKey(group) }
+	end
+
 	cached = { name = group, key = normKey(group) }
 	groupCache[typeName] = cached
 	return cached
 end
 
--- ===== РАЗМЕР СУНДУКОВ (Small / Medium / Large) =====
--- 1) по ключевым словам в названии сундука (Mini/Tiny/Small, Medium, Large/Big/Huge/Giant/Mega);
--- 2) если слов нет - по максимальному здоровью сундука: самые слабые = Small, самые крепкие = Large.
-local CHEST_SIZES = { "Small", "Medium", "Large" }
-local SizeFilter = { sizes = nil }  -- { ["Small"] = true, ... } или nil (все размеры)
-
-local SIZE_WORDS = {
-	{ "mini", "Small" }, { "tiny", "Small" }, { "small", "Small" },
-	{ "medium", "Medium" },
-	{ "large", "Large" }, { "big", "Large" }, { "huge", "Large" }, { "giant", "Large" }, { "mega", "Large" },
-}
-
-local typeMaxHp = {}        -- [полное название монеты] = максимальное увиденное здоровье
-local sizeByHp = {}         -- [полное название монеты] = размер (для сундуков без ключевых слов)
-local sizeDirty = false
-
-local function sizeByWords(typeName)
-	local l = typeName:lower()
-	for _, rule in ipairs(SIZE_WORDS) do
-		if l:find(rule[1], 1, true) then return rule[2] end
-	end
-	return nil
-end
-
-local function rebuildHpSizes()
-	sizeDirty = false
-	table.clear(sizeByHp)
-	local list = {}
-	for tn, hp in pairs(typeMaxHp) do
-		if classify(tn).key == normKey("Chests") and not sizeByWords(tn) then
-			list[#list + 1] = { name = tn, hp = hp }
-		end
-	end
-	table.sort(list, function(a, b) return a.hp < b.hp end)
-	local n = #list
-	for i, e in ipairs(list) do
-		local size = "Medium"
-		if n > 1 then
-			local r = (i - 1) / (n - 1)
-			size = r < 0.34 and "Small" or (r > 0.66 and "Large" or "Medium")
-		end
-		sizeByHp[e.name] = size
-	end
-end
-
-local function chestSize(coin)
-	local tn = coinTypeName(coin)
-	local hp = coin:GetAttribute("Health")
-	if type(hp) == "number" and hp > (typeMaxHp[tn] or 0) then
-		typeMaxHp[tn] = hp
-		sizeDirty = true
-	end
-	local byWords = sizeByWords(tn)
-	if byWords then return byWords end
-	if sizeDirty then rebuildHpSizes() end
-	return sizeByHp[tn] or "Medium"
-end
-
 local function typeAllowed(coin)
-	local info = classify(coinTypeName(coin))
 	local groups = TypeFilter.groups
-	if groups and groups[info.key] ~= true then return false end
-	-- размер применяется только к сундукам, остальные группы не трогаем
-	local sizes = SizeFilter.sizes
-	if sizes and info.key == normKey("Chests") then
-		return sizes[chestSize(coin)] == true
-	end
-	return true
+	if not groups then return true end
+	return groups[classify(coinTypeName(coin), coin).key] == true
 end
 
 -- список для GUI: Coins, Chests, Safes, Vaults + найденные на карте (Diamonds, Presents, ...)
 function CoinManager.GetCoinTypes()
 	for coin in pairs(CoinManager.AllCoins) do
-		local g = classify(coinTypeName(coin)).name
+		local g = classify(coinTypeName(coin), coin).name
 		if not BASE_SET[g] then knownGroups[g] = true end
 	end
 	local labels = {}
@@ -473,16 +460,12 @@ function CoinManager.GetCoinTypes()
 	return labels
 end
 
-function CoinManager.GetChestSizes()
-	return table.clone(CHEST_SIZES)
-end
-
 -- в консоль: какие монеты в какую группу попали (удобно, если что-то оказалось не в той группе)
 function CoinManager.PrintTypes()
 	local groups, order = {}, {}
 	for coin in pairs(CoinManager.AllCoins) do
 		local tn = coinTypeName(coin)
-		local g = classify(tn).name
+		local g = classify(tn, coin).name
 		local e = groups[g]
 		if not e then
 			e = { n = 0, names = {} }
@@ -491,7 +474,6 @@ function CoinManager.PrintTypes()
 		end
 		e.n += 1
 		local label = coinBaseName(coin) .. " <" .. coinCategory(tn) .. ">"
-		if classify(tn).key == normKey("Chests") then label = label .. " [" .. chestSize(coin) .. "]" end
 		e.names[label] = (e.names[label] or 0) + 1
 	end
 	table.sort(order)
@@ -937,7 +919,14 @@ function AutoFarm.SetCoinTypes(types)
 		name = name:match("^%s*(.-)%s*$")
 		if name == "" then return end
 		local mapped = CATEGORY_GROUP[name:lower()] -- старый формат: "chest", "coin"...
-		groups[normKey(mapped or name)] = true
+		local key = normKey(mapped or name)
+		if key == normKey("Chests") then -- "Chests" = все размеры сразу
+			for _, sz in ipairs({ "Small Chests", "Medium Chests", "Large Chests" }) do
+				groups[normKey(sz)] = true
+			end
+		else
+			groups[key] = true
+		end
 		n += 1
 	end
 
@@ -954,25 +943,6 @@ function AutoFarm.SetCoinTypes(types)
 	end
 
 	TypeFilter.groups = (n > 0) and groups or nil
-end
-
--- sizes: nil / {} = все размеры; { "Small", "Large" } = только эти (регистр не важен). Работает только для группы Chests.
-function AutoFarm.SetChestSizes(sizes)
-	local set, n = {}, 0
-	local function add(entry)
-		local l = tostring(entry):lower():match("^%s*(.-)%s*$")
-		for _, sz in ipairs(CHEST_SIZES) do
-			if l == sz:lower() then set[sz] = true; n += 1 end
-		end
-	end
-	if type(sizes) == "table" then
-		for k, v in pairs(sizes) do
-			if type(k) == "number" then add(v) elseif v then add(k) end
-		end
-	elseif type(sizes) == "string" then
-		add(sizes)
-	end
-	SizeFilter.sizes = (n > 0 and n < #CHEST_SIZES) and set or nil -- выбраны все 3 = без фильтра
 end
 
 _G.PetTools = {
