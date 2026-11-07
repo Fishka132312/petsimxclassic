@@ -32,10 +32,6 @@ local function notify(text)
 	end)
 end
 
-local function log(text)
-	if CONFIG.Debug then print("[Eggs] " .. text) end
-end
-
 local function getRoot()
 	local char = LocalPlayer.Character
 	return char and char:FindFirstChild("HumanoidRootPart")
@@ -101,7 +97,7 @@ if not env.__EggHookV2 then
 			return oldNamecall(self, ...)
 		end))
 	else
-		warn("[Eggs] Executor не поддерживает hookmetamethod — перехват невозможен")
+		warn("[Eggs] Executor doesnt support hookmetamethod")
 	end
 end
 
@@ -289,11 +285,9 @@ function AutoOpen.Start(eggId, amount)
 	-- если яйцо не выбрано — берём то, что открывали вручную
 	if not AutoOpen.Egg then AutoOpen.Egg = EggTools.GetLearnedEgg() end
 	if not AutoOpen.Egg then
-		warn("[Eggs] Не выбрано яйцо")
 		return
 	end
 	if not EggTools.IsLearned() then
-		warn("[Eggs] Ремоут ещё не пойман: открой любое яйцо вручную один раз (иначе пробую Network.Invoke)")
 	end
 
 	local token = {}
@@ -335,7 +329,6 @@ function AutoOpen.Start(eggId, amount)
 				fails = fails + 1
 				local text = tostring(msg)
 				local egg, _, dist = nearestEgg(id)
-				warn(string.format("[Eggs] Не вышло (%d/%d): %s | расстояние до яйца: %s",
 					fails, CONFIG.MaxFailures, text,
 					(egg and dist) and string.format("%.1f", dist) or "?"))
 				if fails >= CONFIG.MaxFailures then
@@ -401,7 +394,6 @@ local function installNoAnim()
 		waited += 0.5
 	end
 	if not Lib then
-		warn("[NoEggAnim] Библиотека игры не найдена")
 		return
 	end
 	while not Lib.Loaded do
@@ -496,9 +488,7 @@ local function installNoAnim()
 		env.__NoEggAnimInstalled = method
 		NoAnim.Installed = true
 		NoAnim.Method = method
-		warn("[NoEggAnim] Готово (способ: " .. method .. "). _G.NoEggAnimation = true / false")
 	else
-		warn("[NoEggAnim] Не удалось: нет hookfunction/getconnections или функция OpenEgg не найдена")
 	end
 end
 
@@ -519,12 +509,8 @@ task.spawn(function()
 			getLib()
 			rebuildNames()
 		end)
-		if not ok then warn("[Eggs] Ошибка сканирования: " .. tostring(err)) end
 		task.wait(CONFIG.RescanInterval)
 	end
 end)
 
 task.spawn(getLib)
-
-print("[Eggs] Готово. Открой яйцо вручную ОДИН раз (скрипт поймает ремоут), затем _G.EggTools.AutoOpen.Start('Cracked Egg', 3) / .Stop()")
-print("[Eggs] Анимация яиц: _G.NoEggAnimation = true / false")
