@@ -949,7 +949,6 @@ local netInvokeHooked = trySet(Network, "Invoke", hookedNetInvoke)
 local netFireHooked = trySet(Network, "Fire", hookedNetFire)
 
 local function notify(text)
-	warn("[PetSkins] " .. tostring(text))
 	pcall(function()
 		Library.Message.New(tostring(text))
 	end)
@@ -1023,17 +1022,14 @@ local function dumpGift(giftId)
 		end
 	end
 	table.sort(keys)
-	warn("[PetSkins] gift id " .. tostring(giftId) .. " fields: " .. table.concat(keys, ", "))
 	local egg = {}
 	for eggId, e in pairs(EggDir) do
 		if type(e) == "table" and (e.isExclusive or e.exclusive or e.isGift) then
 			egg[#egg + 1] = tostring(eggId)
 		end
 	end
-	warn("[PetSkins] eggs flagged exclusive/gift: " .. table.concat(egg, ", "))
 	local hint = type(dir) == "table" and dir.giftEggId
 	if hint then
-		warn("[PetSkins] giftEggId = " .. tostring(hint) .. ", exists in Directory.Eggs: " .. tostring(EggDir[hint] ~= nil))
 		local word = string.lower(string.match(tostring(hint), "%a+") or "")
 		local similar = {}
 		for eggId in pairs(EggDir) do
@@ -1041,7 +1037,6 @@ local function dumpGift(giftId)
 				similar[#similar + 1] = tostring(eggId)
 			end
 		end
-		warn("[PetSkins] similar egg ids: " .. table.concat(similar, ", "))
 	end
 end
 
@@ -1382,10 +1377,8 @@ local function fireAnimation(...)
 		task.spawn(function()
 			local okc, errc = xpcall(fn, debug.traceback, table.unpack(args, 1, args.n))
 			if not okc then
-				warn("[PetSkins] performOpen ERROR: " .. tostring(errc))
 			end
 		end)
-		warn("[PetSkins] animation started via performOpen")
 		return true
 	end
 	errors[#errors + 1] = "performOpen not found in memory"
@@ -1396,7 +1389,6 @@ local function fireAnimation(...)
 		if type(firesignal) == "function" then
 			local ok, err = pcall(firesignal, remote.OnClientEvent, table.unpack(args, 1, args.n))
 			if ok then
-				warn("[PetSkins] animation event fired via firesignal")
 				return true
 			end
 			errors[#errors + 1] = "firesignal: " .. tostring(err)
@@ -1508,19 +1500,16 @@ local function askAmount(amounts)
 end
 
 local function openGiftLocal(uid)
-	warn("[PetSkins] gift click, uid=" .. tostring(uid) .. " skin=" .. tostring(skins[uid]))
 	if unloaded then
 		return
 	end
 	local giftId = skins[uid]
 	if not isGiftSkin(giftId) then
-		warn("[PetSkins] ignored: skin is not a gift")
 		return
 	end
 	local eggId = resolveEggId(giftId)
 	if not eggId then
 		dumpGift(giftId)
-		notify("Could not find which egg this gift opens. Check the console (F9) and send me the printed lines.")
 		return
 	end
 
@@ -1533,9 +1522,6 @@ local function openGiftLocal(uid)
 	for _, a in ipairs(src) do
 		amounts[#amounts + 1] = a
 	end
-	warn("[PetSkins] egg=" .. tostring(eggId) .. " amounts=" .. table.concat(amounts, ","))
-
-	warn("[PetSkins] showing dialog")
 	local choice
 	local okMsg, resMsg = pcall(function()
 		if #amounts == 1 then
@@ -1550,19 +1536,15 @@ local function openGiftLocal(uid)
 	if okMsg then
 		choice = resMsg
 	else
-		warn("[PetSkins] game dialog failed (" .. tostring(resMsg) .. "), using own dialog")
 		choice = askAmount(amounts)
 	end
-	warn("[PetSkins] dialog choice = " .. tostring(choice))
 	if not choice then
-		warn("[PetSkins] dialog cancelled / no choice")
 		return
 	end
 	local amount = amounts[choice] or 1
 
 	local positions, origin = localPositions(amount)
 	if not positions then
-		notify("Character not ready.")
 		return
 	end
 
@@ -1570,7 +1552,6 @@ local function openGiftLocal(uid)
 	for i = 1, amount do
 		local petId, chance = rollDrop(eggId)
 		if not petId then
-			notify("This egg has no drops table I can read (egg: " .. eggId .. ").")
 			return
 		end
 		local fake = "local_" .. HttpService:GenerateGUID(false)
@@ -1598,7 +1579,6 @@ local function openGiftLocal(uid)
 		pcall(function()
 			invGui.Gui.Enabled = true
 		end)
-		notify("Could not play the animation: " .. tostring(err))
 		return
 	end
 
@@ -1607,7 +1587,6 @@ local function openGiftLocal(uid)
 		local started = os.clock()
 		task.delay(5, function()
 			if giftOpening and (Library.Variables.OpeningEgg or 0) <= 0 then
-				warn("[PetSkins] animation did NOT start (OpeningEgg is still 0). Egg: " .. tostring(eggId))
 			end
 		end)
 		repeat
@@ -1649,12 +1628,10 @@ local function syncGiftOverlays()
 					btn.AutoButtonColor = false
 					btn.Parent = cell
 					btn.Activated:Connect(function()
-						warn("[PetSkins] overlay activated for " .. tostring(uid))
 						if skins[uid] and isGiftSkin(skins[uid]) then
 							task.spawn(function()
 								local ok, err = xpcall(openGiftLocal, debug.traceback, uid)
 								if not ok then
-									warn("[PetSkins] ERROR: " .. tostring(err))
 									giftOpening = false
 								end
 							end)
@@ -3067,7 +3044,6 @@ local function makeCell(parent, order, entry, resetPet)
 				usedGameUI = true
 			else
 				previewPets[pv] = nil
-				warn("[PetSkins] PetUI.Create failed for " .. entry.id .. ": " .. tostring(errUI))
 			end
 		end
 	end
@@ -3413,7 +3389,6 @@ end
 local DEBUG = true -- prints why a click did not open the picker (executor console / F9)
 local function dbg(...)
 	if DEBUG then
-		warn("[PetSkins]", ...)
 	end
 end
 
@@ -3459,7 +3434,6 @@ connections[#connections + 1] = UserInputService.InputBegan:Connect(function(inp
 	suppressEquipUntil = os.clock() + 0.6
 	local ok, err = pcall(openPicker, uid)
 	if not ok then
-		warn("[PetSkins] openPicker error: " .. tostring(err))
 		pcall(closePicker)
 	end
 end)
@@ -3893,7 +3867,6 @@ connections[#connections + 1] = RunService.Heartbeat:Connect(function()
 	if want ~= changerOn then
 		local ok, err = pcall(setChanger, want)
 		if not ok then
-			warn("[PetSkins] PetsChanger switch error: " .. tostring(err))
 		end
 	end
 end)
