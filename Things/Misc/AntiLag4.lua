@@ -1,20 +1,20 @@
 --[[
-    Антилаг 4 — Coin Optimizer с переключателем и откатом.
-    1) Коины дальше FAR_DISTANCE студов выносятся из workspace (Parent = nil),
-       а при приближении возвращаются. Не Destroy: иначе коин не вернётся
-       (оригинал создаёт папку коина только один раз при Add Coin).
-    2) Убираем самое тяжёлое косметическое: частицы удара/взрыва, свет и частицы
-       на самих коинах, звуки.
-    Оригинальный скрипт Coins НЕ выключается.
+    Anti-Lag 4 — Coin Optimizer with a toggle and rollback.
+    1) Coins farther than FAR_DISTANCE studs are moved out of workspace (Parent = nil)
+       and returned when you get closer. Not Destroy: otherwise the coin won't come back
+       (the original only creates a coin's folder once, on Add Coin).
+    2) Removes the heaviest cosmetic stuff: hit/explosion particles, lights and particles
+       on the coins themselves, sounds.
+    The original Coins script is NOT disabled.
 
-    _G.AntiLag4Enabled = true   -> оптимизация включена
-    _G.AntiLag4Enabled = false  -> всё возвращено (вынесенные коины снова в workspace,
-                                   эффекты, звуки и шаблоны частиц как были)
+    _G.AntiLag4Enabled = true   -> optimization on
+    _G.AntiLag4Enabled = false  -> everything restored (moved-out coins are back in workspace,
+                                   effects, sounds and particle templates as they were)
 
-    Повторный запуск скрипта сначала выгружает прошлую копию и откатывает её изменения.
+    Re-running the script first unloads the previous copy and rolls back its changes.
 ]]
 
--- Имя переменной-переключателя (у каждого анти-лага своё)
+-- Name of the toggle variable (each anti-lag has its own)
 local FLAG = "AntiLag4Enabled"
 
 local CLEANUP = FLAG .. "_Cleanup"
@@ -23,7 +23,7 @@ if _G[CLEANUP] then
     _G[CLEANUP] = nil
 end
 if _G[FLAG] == nil then
-    _G[FLAG] = false -- по умолчанию выключен. Хочешь, чтобы включался сам при запуске — поставь true
+    _G[FLAG] = false -- off by default. Want it to turn on by itself at launch? Set true
 end
 
 local function enabled()
@@ -38,15 +38,15 @@ local Library = require(ReplicatedStorage:WaitForChild("Framework"):WaitForChild
 local LocalPlayer = Players.LocalPlayer
 while not Library.Loaded do task.wait() end
 
---================ НАСТРОЙКИ ================--
-local FAR_DISTANCE         = 999    -- дальше этого коины убираются из workspace
-local RESTORE_MARGIN       = 50     -- вернуть, когда ближе FAR_DISTANCE - RESTORE_MARGIN (чтобы не мигали на границе)
-local CHECK_INTERVAL       = 1      -- как часто проверять дистанцию (сек)
-local DESTROY_FAR          = false  -- true = удалять навсегда (коин не вернётся до смены мира/перезахода, откат не вернёт!)
-local DISABLE_COIN_FX      = true   -- выключить частицы/свет/beam на моделях коинов
-local KILL_HIT_PARTICLES   = true   -- убрать частицы удара/взрыва коинов (клоны шаблонов из Assets.Particles)
-local MUTE_COIN_SOUNDS     = true   -- глушить звуки ударов/падения/разрушения коинов
-local BATCH                = 300    -- объектов за кадр при откате
+--================ SETTINGS ================--
+local FAR_DISTANCE         = 999    -- coins farther than this are removed from workspace
+local RESTORE_MARGIN       = 50     -- return when closer than FAR_DISTANCE - RESTORE_MARGIN (so they don't flicker at the border)
+local CHECK_INTERVAL       = 1      -- how often to check distance (sec)
+local DESTROY_FAR          = false  -- true = delete permanently (the coin won't return until world change/rejoin, rollback won't bring it back!)
+local DISABLE_COIN_FX      = true   -- disable particles/lights/beams on coin models
+local KILL_HIT_PARTICLES   = true   -- remove coin hit/explosion particles (clones of templates from Assets.Particles)
+local MUTE_COIN_SOUNDS     = true   -- mute coin hit/fall/destroy sounds
+local BATCH                = 300    -- objects per frame during rollback
 --==========================================--
 
 local CoinsFolder = Library.Things:WaitForChild("Coins", 15)
@@ -63,22 +63,22 @@ local function disconnect(c)
     pcall(function() c:Disconnect() end)
 end
 
--- ================== СОСТОЯНИЕ ==================
+-- ================== STATE ==================
 local alive, active = true, false
-local sid = 0                -- номер сессии (каждое включение = новая сессия)
-local conns = {}             -- подключения текущей сессии
-local saved = setmetatable({}, { __mode = "k" }) -- [obj] = { [prop] = исходное значение }
+local sid = 0                -- session number (each enable = a new session)
+local conns = {}             -- connections of the current session
+local saved = setmetatable({}, { __mode = "k" }) -- [obj] = { [prop] = original value }
 local info = {}              -- [id] = { folder, pos, stored }
 local nStored = 0
 local particleBackup = {}    -- { { template = inst, children = { ... } } }
-local audioOrig              -- оригинальный Audio.Play
+local audioOrig              -- original Audio.Play
 
 local function track(conn)
     conns[#conns + 1] = conn
     return conn
 end
 
--- ================== СВОЙСТВА (сохранить / вернуть) ==================
+-- ================== PROPERTIES (save / restore) ==================
 local function setProp(obj, prop, value)
     local ok = pcall(function() obj[prop] = value end)
     if not ok and sethiddenproperty then
@@ -118,14 +118,14 @@ local function revertProps(sync)
     end
 end
 
--- ================== ЗВУКИ ==================
+-- ================== SOUNDS ==================
 local blocked = {}
 for _, id in ipairs({
-    6485234572, 6485234808, 6485234993,                                   -- удар
-    6422233047, 6422233117, 12151937071, 12151936879, 12151936744,        -- монеты
-    6422233314, 6422233259, 6422233191, 12151937223,                      -- сундуки
-    6958718789, 6958718747, 7029284027, 11648888186,                      -- сейф/хранилище/special/luckyblock
-    6958713639, 6958713793, 6958713747, 6958713692, 9395255388, 12970061125, -- разрушение
+    6485234572, 6485234808, 6485234993,                                   -- hit
+    6422233047, 6422233117, 12151937071, 12151936879, 12151936744,        -- coins
+    6422233314, 6422233259, 6422233191, 12151937223,                      -- chests
+    6958718789, 6958718747, 7029284027, 11648888186,                      -- safe/vault/special/luckyblock
+    6958713639, 6958713793, 6958713747, 6958713692, 9395255388, 12970061125, -- destruction
 }) do
     blocked[tostring(id)] = true
 end
@@ -158,9 +158,9 @@ local function unpatchAudio()
     end
 end
 
--- ================== ЧАСТИЦЫ УДАРА ==================
--- CoinDamageAnimation / PetDamageAnimation клонируют эти шаблоны на каждый удар по коину.
--- Вместо ClearAllChildren дети шаблонов временно снимаются (Parent = nil) и потом возвращаются.
+-- ================== HIT PARTICLES ==================
+-- CoinDamageAnimation / PetDamageAnimation clone these templates on every hit on a coin.
+-- Instead of ClearAllChildren, the template children are temporarily removed (Parent = nil) and returned later.
 local function killHitParticles(ok)
     local P = Library.Assets:WaitForChild("Particles", 10)
     if not P or not ok() then return end
@@ -178,7 +178,7 @@ local function killHitParticles(ok)
     for _, name in ipairs({ "New Coin Particle", "Pet Damage" }) do
         local t = P:FindFirstChild(name)
         if t and t:IsA("ParticleEmitter") then
-            -- объект остаётся (оригинал его клонирует и зовёт Emit), но частицы не живут
+            -- the object stays (the original clones it and calls Emit), but particles don't live
             setSaved(t, "Lifetime", NumberRange.new(0))
         end
     end
@@ -194,7 +194,7 @@ local function restoreParticles()
     end
 end
 
--- ================== КОИНЫ: ОТСЕЧЕНИЕ ПО ДИСТАНЦИИ ==================
+-- ================== COINS: DISTANCE CULLING ==================
 local FX = { ParticleEmitter = true, Beam = true, Trail = true,
     PointLight = true, SpotLight = true, SurfaceLight = true }
 
@@ -203,7 +203,7 @@ local function register(folder)
     local id = folder.Name
     local c = info[id]
     if c and c.folder == folder then
-        -- вернули мы сами
+        -- we returned it ourselves
         if c.stored then c.stored = false; nStored -= 1 end
         return
     end
@@ -212,7 +212,7 @@ local function register(folder)
     info[id] = { folder = folder, pos = pos.Position, stored = false }
 end
 
--- вернуть вынесенные коины в workspace
+-- return moved-out coins to workspace
 local function restoreCoins(sync)
     local n = 0
     for id, c in pairs(info) do
@@ -228,21 +228,21 @@ local function restoreCoins(sync)
     nStored = 0
 end
 
--- ================== СЕССИЯ (одно включение) ==================
+-- ================== SESSION (one enable) ==================
 local function startSession()
     sid += 1
     local id = sid
     local function ok() return alive and active and sid == id end
 
-    -- звуки
+    -- sounds
     if MUTE_COIN_SOUNDS then patchAudio() end
 
-    -- частицы удара (ждёт папку Assets.Particles, поэтому в отдельном потоке)
+    -- hit particles (waits for the Assets.Particles folder, hence a separate thread)
     if KILL_HIT_PARTICLES then
         task.spawn(function() pcall(killHitParticles, ok) end)
     end
 
-    -- эффекты на моделях коинов
+    -- effects on coin models
     if DISABLE_COIN_FX then
         track(CoinsFolder.DescendantAdded:Connect(function(d)
             if ok() and FX[d.ClassName] then setSaved(d, "Enabled", false) end
@@ -252,7 +252,7 @@ local function startSession()
         end
     end
 
-    -- отсечение по дистанции
+    -- distance culling
     info = {}
     nStored = 0
     track(CoinsFolder.ChildAdded:Connect(function(f)
@@ -260,7 +260,7 @@ local function startSession()
     end))
     for _, f in ipairs(CoinsFolder:GetChildren()) do register(f) end
 
-    -- Коин удалён сервером: вынесенную папку уничтожаем сами (оригинал её не найдёт в Things.Coins)
+    -- Coin removed by the server: we destroy the moved-out folder ourselves (the original won't find it in Things.Coins)
     track(Library.Network.Fired("Remove Coin"):Connect(function(coinId)
         if not ok() then return end
         local c = info[coinId]
@@ -272,7 +272,7 @@ local function startSession()
         end
     end))
 
-    -- Смена мира: оригинал перезагрузит все коины заново, наши вынесенные чистим
+    -- World change: the original reloads all coins from scratch, we clean up our moved-out ones
     track(Library.Signal.Fired("World Changed"):Connect(function()
         if not ok() then return end
         for _, c in pairs(info) do
@@ -294,7 +294,7 @@ local function startSession()
                     local d = (c.pos - p).Magnitude
                     if c.stored then
                         if d <= restoreAt then
-                            folder.Parent = CoinsFolder -- ChildAdded -> register сбросит stored
+                            folder.Parent = CoinsFolder -- ChildAdded -> register resets stored
                         end
                     elseif d > FAR_DISTANCE then
                         if folder.Parent == CoinsFolder then
@@ -307,7 +307,7 @@ local function startSession()
                                 folder.Parent = nil
                             end
                         else
-                            info[cid] = nil -- папку уже удалил оригинал
+                            info[cid] = nil -- the folder was already removed by the original
                         end
                     end
                 end
@@ -326,7 +326,7 @@ local function stopSession()
     revertProps(false)
 end
 
--- ================== ПЕРЕКЛЮЧАТЕЛЬ ==================
+-- ================== TOGGLE ==================
 task.spawn(function()
     while alive do
         local want = enabled()
@@ -341,7 +341,7 @@ task.spawn(function()
     end
 end)
 
--- ================== ВЫГРУЗКА ==================
+-- ================== UNLOAD ==================
 _G[CLEANUP] = function()
     alive = false
     active = false
