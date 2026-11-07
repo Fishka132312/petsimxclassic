@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------уйцуцйуй
+--------------------------------------------------------------------------------
 -- CONFIG
 --------------------------------------------------------------------------------
 local CONFIG = {
@@ -6,8 +6,8 @@ local CONFIG = {
 	MaxFailures      = 5,  -- this many failures in a row -> auto-open stops
 	FailDelay        = 1,  -- pause after a failed purchase
 	RescanInterval   = 15, -- how often to rescan eggs on the map
-	AfkArriveWait    = 0.15, -- AFK+TP: minimum pause at the egg so the server sees the new position (ping is added on top)
-	AfkAttempts      = 4,    -- AFK+TP: how many purchase attempts at the egg before giving up and going back
+	AfkArriveWait    = 0.25, -- AFK+TP: minimum pause at the egg so the server sees the new position (ping is added on top)
+	AfkAttempts      = 6,    -- AFK+TP: how many purchase attempts at the egg before giving up and going back
 	AfkRetryWait     = 0.2,  -- AFK+TP: pause between attempts at the egg
 	AfkCooldownMax   = 25,   -- AFK+TP: max wait for the egg-opening animation (the game's cooldown) to finish
 }
@@ -301,44 +301,53 @@ task.spawn(function()
 	if not AutoOpen.Home then EggTools.SetHome() end
 end)
 
--- The game's real cooldown = the opening animation (Variables.OpeningEgg > 0).
--- We count "Done Opening Egg" signals so we never miss a short (instant) animation.
-local doneCount = 0
-local doneHooked = false
-local function hookDoneSignal()
+-- The game's real cooldown = the egg opening animation.
+-- We count "Opening Egg" (start) and "Done Opening Egg" (end) signals, so even an
+-- instant animation can't be missed and an OLD animation can't be mistaken for ours.
+local startCount, doneCount = 0, 0
+local signalsHooked = false
+local function hookSignals()
 	local lib = getLib()
 	if not lib then return false end
-	local myGenNow = _G.EggToolsGen
+	local gen = _G.EggToolsGen
 	local ok = pcall(function()
+		lib.Signal.Fired("Opening Egg"):Connect(function()
+			if _G.EggToolsGen == gen then startCount = startCount + 1 end
+		end)
 		lib.Signal.Fired("Done Opening Egg"):Connect(function()
-			if _G.EggToolsGen == myGenNow then
-				doneCount = doneCount + 1
-			end
+			if _G.EggToolsGen == gen then doneCount = doneCount + 1 end
 		end)
 	end)
-	if ok then doneHooked = true end
+	if ok then signalsHooked = true end
 	return ok
 end
 task.spawn(function()
 	local t = 0
-	while not hookDoneSignal() and t < 30 do
+	while not hookSignals() and t < 30 do
 		task.wait(0.5)
 		t += 0.5
 	end
 end)
 
--- Wait until the animation that started after `before` finishes (the cooldown).
-local function waitCooldown(before, token)
+-- true while any egg animation (the cooldown) is still running
+local function animActive()
+	if isOpening() then return true end
+	return signalsHooked and startCount > doneCount
+end
+
+-- After a successful purchase: wait for OUR animation to start, then to finish.
+-- `startBefore` = startCount right before the purchase call.
+local function waitCooldown(startBefore, token)
 	local t = os.clock()
 	local function alive() return AutoOpen.Enabled and AutoOpen.Token == token end
-	if doneHooked then
-		while doneCount <= before and os.clock() - t < CONFIG.AfkCooldownMax and alive() do
-			task.wait(0.05)
-		end
-	else
-		-- fallback: poll Variables.OpeningEgg
-		while not isOpening() and os.clock() - t < 1.5 and alive() do task.wait(0.05) end
-		while isOpening() and os.clock() - t < CONFIG.AfkCooldownMax and alive() do task.wait(0.05) end
+	-- 1) the animation starts shortly after the purchase
+	while startCount <= startBefore and not isOpening()
+		and os.clock() - t < 3 and alive() do
+		task.wait(0.03)
+	end
+	-- 2) wait until every animation is over
+	while animActive() and os.clock() - t < CONFIG.AfkCooldownMax and alive() do
+		task.wait(0.05)
 	end
 end
 
@@ -374,9 +383,10 @@ local function afkOpenOnce(eggId, amount, token)
 	pcall(function() ping = LocalPlayer:GetNetworkPing() end)
 	task.wait(math.max(CONFIG.AfkArriveWait, ping * 2 + 0.1))
 
-	local before = doneCount
+	local startBefore = startCount
 	local ok, msg = false, "no attempt"
 	for attempt = 1, CONFIG.AfkAttempts do
+		startBefore = startCount
 		local okCall, a, b = pcall(EggTools.OpenOnce, eggId, amount)
 		if okCall then ok, msg = a, b else ok, msg = false, tostring(a) end
 		if ok then break end
@@ -395,7 +405,7 @@ local function afkOpenOnce(eggId, amount, token)
 
 	if ok then
 		-- stand at home until the animation (cooldown) is over
-		waitCooldown(before, token)
+		waitCooldown(startBefore, token)
 	end
 	return ok, msg
 end
@@ -433,8 +443,8 @@ function AutoOpen.Start(eggId, amount)
 
 			if AutoOpen.WaitAnimation or AutoOpen.Afk then
 				local t = os.clock()
-				while isOpening() and os.clock() - t < 15 and AutoOpen.Enabled and AutoOpen.Token == token do
-					task.wait(0.1)
+				while animActive() and os.clock() - t < 25 and AutoOpen.Enabled and AutoOpen.Token == token do
+					task.wait(0.05)
 				end
 			end
 
