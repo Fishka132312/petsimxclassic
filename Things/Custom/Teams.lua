@@ -125,7 +125,6 @@ if dead then
 	return
 end
 if not okLib or type(Library) ~= "table" then
-	warn("[Teams] Не удалось загрузить Library: " .. tostring(Library))
 	return
 end
 
@@ -137,7 +136,6 @@ do
 			return
 		end
 		if os.clock() - t0 > 30 then
-			warn("[Teams] Library не загрузилась за 30 секунд")
 			return
 		end
 	end
@@ -805,7 +803,6 @@ local function petCall(uid, equip)
 			lastMsg = nil
 		end
 		local via = entry and ("learned [%d] %s"):format(entry.index, entry.method) or "Library.Network.Invoke (NOT learned)"
-		warn(("[Teams] %s %s via %s (попытка %d): ok=%s res=%s msg=%s"):format(
 			name, tostring(uid), via, attempt, tostring(okI), tostring(res), tostring(msg)))
 		task.wait(0.15 * attempt)
 		if isEq(uid) == equip then
@@ -843,7 +840,6 @@ local function unequipPets(list)
 			if okI and res ~= false and waitUntil(allOff, 2.5) then
 				return 0
 			end
-			warn(("[Teams] Unequip All [%d] (попытка %d): ok=%s res=%s, ещё надето: %d"):format(
 				entry.index, attempt, tostring(okI), tostring(res), #stillEquipped(list)))
 			if allOff() then
 				return 0
@@ -1127,7 +1123,6 @@ local function applyUids(wantedIn, title, team)
 		busy = false
 		lastActionAt = os.clock()
 		if not ok then
-			warn("[Teams] Ошибка экипировки: " .. tostring(err))
 			toast("Something went wrong. Try again!", THEME.Red)
 		end
 		if updateStates then
@@ -1234,7 +1229,6 @@ local function unequipEverything()
 		busy = false
 		lastActionAt = os.clock()
 		if not ok then
-			warn("[Teams] Ошибка снятия: " .. tostring(err))
 			toast("Something went wrong. Try again!", THEME.Red)
 		end
 		if updateStates then
@@ -1638,7 +1632,6 @@ local function watchUnequipAll(tok)
 					net.unequipAll = { index = c.index, method = c.method, n = c.n, args = c.args, remote = c.remote }
 					saveTeams()
 					playSound(SOUNDS.Pop)
-					warn(("[Teams] Unequip All выучен: [%d] %s (%d args)"):format(c.index, c.method, c.n))
 					stopLearn(("Learned! Equip [%d]  ·  Unequip [%d]  ·  Unequip All [%d]"):format(
 						net.equip and net.equip.index or 0, net.unequip and net.unequip.index or 0, c.index), THEME.Green)
 					return
@@ -1647,7 +1640,6 @@ local function watchUnequipAll(tok)
 				for _, c in ipairs(learnCands) do
 					seen[#seen + 1] = ("[%d]x%d"):format(c.index, c.n)
 				end
-				warn("[Teams] Unequip All: петы сняты, но подходящий вызов не найден. Видел вызовы: "
 					.. (#seen > 0 and table.concat(seen, ", ") or "нет ни одного"))
 				toast("Pets were removed, but no remote call was seen. Try again", THEME.Orange, true)
 				hist = { { now, cnt } }
@@ -2797,7 +2789,6 @@ if detectUnequipAll() then
 end
 refreshLearnBtn()
 rebuild(nil, true)
-print(("[Teams] Загружено. Команд: %d. Хранение в файле: %s"):format(#teams, canFS and "да" or "нет"))
 
 ----------------------------------------------------------------------
 -- Вкл/выкл через getgenv().TeamsEnabled
