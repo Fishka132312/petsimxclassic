@@ -40,7 +40,6 @@ local holder = Library.GUI.Hoverboards.Container.Holder
 
 local function EquipLocal(name)
 	if not Library.Directory.Hoverboards[name] then
-		warn("[Hoverboard] нет такой доски:", name)
 		return
 	end
 	local save = Library.Save.Get()
@@ -48,13 +47,11 @@ local function EquipLocal(name)
 		save.EquippedHoverboard = name
 	end)
 	if not ok then
-		warn("[Hoverboard] не удалось экипировать ->", err)
 		return
 	end
 	pcall(function()
 		Library.Signal.Fire("Stat Changed", "EquippedHoverboard")
 	end)
-	print("[Hoverboard] Экипирована:", name)
 end
 
 local function HookButton(btn)
@@ -83,5 +80,3 @@ myConns[#myConns + 1] = holder.ChildAdded:Connect(function(child)
 	task.wait()
 	HookButton(child)
 end)
-
-print("[Hoverboard] Клики по доскам теперь экипируют локально")
