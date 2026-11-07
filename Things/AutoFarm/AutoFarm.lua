@@ -1,5 +1,5 @@
 --------------------------------------------------------------------------------
--- AUTOFARM v2
+-- AUTOFARM v2 + выбор типов монет (AutoFarm.SetCoinTypes)
 -- Changes compared to the old version (based on the game's Coins/Pets/Select Pets scripts):
 --  1. Remotes are called through the game's own Library.Network ("Join Coin" / "Farm Coin"),
 --     the same way the game does it -> no need to click a coin manually anymore,
@@ -21,6 +21,9 @@
 --  8. Coins with Health <= 0 are released immediately, TravelGrace is shortened.
 --
 -- Usage: AutoFarm.Start(locations) / AutoFarm.Stop() / AutoFarm.SetLocation(...)
+--        AutoFarm.SetCoinTypes({ "Name", ... })  -- какие типы монет ломать (пусто/nil = все)
+--        CoinManager.GetCoinTypes()              -- список типов "Name [категория]"
+--        CoinManager.PrintTypes()                -- напечатать в консоль типы и сколько их сейчас на карте
 --------------------------------------------------------------------------------
 local CONFIG = {
 	CoinsPath = { "__THINGS", "Coins" },
@@ -29,6 +32,7 @@ local CONFIG = {
 	LocationAttr = "Area",
 	IdAttr       = "ID",
 	OwnerAttr    = "Owner",
+	NameAttr     = "Name",   -- тип монеты (атрибут ставит игра в Coins.lua)
 
 	SearchRadius   = math.huge, -- "auto" | number | math.huge (unlimited). Как в старом фарме: все монеты на карте
 	ProbeInterval  = 15,     -- every N sec try a coin farther than the current radius
@@ -106,6 +110,16 @@ end
 
 local function coinLocation(coin)
 	return tostring(coin:GetAttribute(CONFIG.LocationAttr) or "Unknown")
+end
+
+local function coinTypeName(coin)
+	return tostring(coin:GetAttribute(CONFIG.NameAttr) or "Unknown")
+end
+
+-- выбранные типы монет: set = nil -> все. Принимает "Name" или "Name [категория]"
+local TypeFilter = { set = nil }
+local function stripLabel(s)
+	return (tostring(s):gsub("%s*%[[^%]]*%]%s*$", ""))
 end
 
 -- locations: nil (all) | "Name" | { "Name1", "Name2" } | { Name1 = true, ... }
@@ -287,6 +301,46 @@ function CoinManager.GetLocationNames()
 	return names
 end
 
+-- категория типа монеты по landSound из игрового Directory (coin, chest, safe, vault, luckyblock...)
+local function coinCategory(name)
+	local ok, cat = pcall(function()
+		return Library.Directory.Coins[name].landSound
+	end)
+	return (ok and cat) and tostring(cat) or "?"
+end
+
+-- список типов монет, которые сейчас есть на карте: "Name [категория]"
+function CoinManager.GetCoinTypes()
+	local seen, entries = {}, {}
+	for coin in pairs(CoinManager.AllCoins) do
+		local name = coinTypeName(coin)
+		if not seen[name] then
+			seen[name] = true
+			entries[#entries + 1] = { name = name, cat = coinCategory(name) }
+		end
+	end
+	table.sort(entries, function(a, b)
+		if a.cat ~= b.cat then return a.cat < b.cat end
+		return a.name < b.name
+	end)
+	local labels = {}
+	for i, e in ipairs(entries) do labels[i] = e.name .. " [" .. e.cat .. "]" end
+	return labels
+end
+
+function CoinManager.PrintTypes()
+	local counts, names = {}, {}
+	for coin in pairs(CoinManager.AllCoins) do
+		local name = coinTypeName(coin)
+		if not counts[name] then names[#names + 1] = name; counts[name] = 0 end
+		counts[name] += 1
+	end
+	table.sort(names)
+	for _, name in ipairs(names) do
+		print(string.format("[Pets] %s [%s] x%d", name, coinCategory(name), counts[name]))
+	end
+end
+
 -- is the coin suitable for farming (what the server will surely accept)
 local function coinUsable(coin)
 	if not coin.Parent then return false end
@@ -309,6 +363,7 @@ function CoinManager.GetCoins(locations, origin, radius, skip)
 		if not (skip and skip[coin])
 			and not CoinManager.IsRejected(coin, now)
 			and (not filter or filter[coinLocation(coin)])
+			and (not TypeFilter.set or TypeFilter.set[coinTypeName(coin)])
 			and coinUsable(coin)
 		then
 			local pos = getPos(coin)
@@ -490,6 +545,8 @@ function PetController.Distribute(locations)
 		if not coin.Parent or not getPos(coin) then
 			release = true
 		elseif filter and not filter[coinLocation(coin)] then
+			release = true
+		elseif TypeFilter.set and not TypeFilter.set[coinTypeName(coin)] then
 			release = true
 		else
 			local hp = trackProgress(coin, a, now)
@@ -688,6 +745,29 @@ end
 
 function AutoFarm.SetLocation(locations)
 	AutoFarm.Location = locations
+end
+
+-- types: nil / {} = ломать все типы | { "Name", ... } (подходят и метки "Name [категория]")
+function AutoFarm.SetCoinTypes(types)
+	local set, n = {}, 0
+	if type(types) == "table" then
+		for k, v in pairs(types) do
+			local name
+			if type(k) == "number" then
+				name = stripLabel(v)
+			elseif v then
+				name = stripLabel(k)
+			end
+			if name and name ~= "" and not set[name] then
+				set[name] = true
+				n += 1
+			end
+		end
+	elseif type(types) == "string" and types ~= "" then
+		set[stripLabel(types)] = true
+		n = 1
+	end
+	TypeFilter.set = n > 0 and set or nil
 end
 
 _G.PetTools = {
