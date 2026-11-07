@@ -31,14 +31,12 @@ local HIDE_BAGS        = true   -- делать мешки невидимыми
 local MUTE_SOUNDS      = true   -- глушить звуки орбов/мешков
 local MUTE_QUEST_GLOW  = true   -- убрать подсветку лутбагов
 local MUTE_CURRENCY_FX = true   -- убрать вылетающую валюту (AddCurrency). Внимание: отключается и для остальных источников
-local DEBUG            = false  -- печатать статистику в консоль (F9)
 --==========================================--
 -- Все глушилки действуют только пока AutoCollectOrbsLootbags включена.
 
 local alive = true
 local connections = {}
 local restoreFns = {}
-local stats = { orbs = 0, bags = 0 }
 
 local function connect(signal, fn)
 	local c = signal:Connect(fn)
@@ -90,7 +88,6 @@ if MUTE_SOUNDS then
 	end)
 	if ok then
 		restoreFns[#restoreFns + 1] = function() Library.Audio.Play = origPlay end
-	else
 	end
 end
 
@@ -185,7 +182,6 @@ local Orbs = Library.Things:WaitForChild("Orbs")
 local function onOrb(part)
 	if not part:IsA("BasePart") or tracked[part] then return end
 	strip(part)
-	stats.orbs += 1
 	follow(part, -2) -- оригинал меряет дистанцию до pos + (0,2,0)
 end
 
@@ -212,7 +208,6 @@ local function onBag(part)
 
 	local function tryFollow()
 		if enabled() and not tracked[part] and bagReady(part) then
-			stats.bags += 1
 			follow(part, 0)
 		end
 	end
@@ -246,15 +241,6 @@ task.spawn(function()
 		task.wait(0.5)
 	end
 end)
-
-if DEBUG then
-	task.spawn(function()
-		while alive do
-			task.wait(5)
-				tostring(enabled()), stats.orbs, stats.bags))
-		end
-	end)
-end
 
 --================ ВЫГРУЗКА ================--
 _G.MagnetCleanup = function()
