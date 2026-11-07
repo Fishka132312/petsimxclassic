@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------вф
+--------------------------------------------------------------------------------уцуй
 -- CONFIG
 --------------------------------------------------------------------------------
 local CONFIG = {
@@ -11,7 +11,7 @@ local CONFIG = {
 	AfkStartWait     = 1,    -- AFK+TP: max wait for the animation-start signal after a purchase
 	AfkMinCycle      = 0.4,  -- AFK+TP: minimum time of one full cycle (egg -> buy -> home). Needed with No Egg Animation, where the game's cooldown is ~0 and the teleports get too fast. Lower = faster
 	AfkCooldownMax   = 25,   -- AFK+TP: max wait for the egg-opening animation to finish
-	AfkEarlyBy       = 0.15, -- AFK+TP: go back to the egg this many seconds BEFORE the animation ends (measured from the previous animation). 0 = wait for the very end, higher = faster but may fail more often
+	AfkHomeWait      = 0.6,  -- AFK+TP: minimum time to stand at Home after buying, before going to the egg again (on top of waiting for the animation). Lower = faster
 	AfkEggOffset     = Vector3.new(0, 3, 6), -- AFK+TP: where to stand relative to the egg center
 }
 
@@ -347,14 +347,10 @@ end
 
 local RunService = game:GetService("RunService")
 
--- Wait while an animation is running, but leave AfkEarlyBy seconds before the expected end
--- (expected = how long the previous animation took).
+-- Wait while an animation is running (until its real end).
 local function waitAnimEnd(alive)
 	local t = os.clock()
 	while animActive() and alive() and os.clock() - t < CONFIG.AfkCooldownMax do
-		if animStart and animDuration and os.clock() - animStart >= animDuration - CONFIG.AfkEarlyBy then
-			break
-		end
 		RunService.Heartbeat:Wait()
 	end
 end
@@ -447,10 +443,14 @@ local function afkOpenOnce(eggId, amount, token)
 
 	-- always go back, even if the purchase failed
 	goHome()
+	local homeSince = os.clock()
 
 	if ok then
 		-- stand at Home until the animation (cooldown) is over
 		waitCooldown(startBefore, token)
+		-- sit at Home at least AfkHomeWait before the next trip to the egg
+		local homeRest = CONFIG.AfkHomeWait - (os.clock() - homeSince)
+		if homeRest > 0 and alive() then task.wait(homeRest) end
 		-- keep a minimum cycle time (instant animation = no natural cooldown)
 		local rest = CONFIG.AfkMinCycle - (os.clock() - cycleStart)
 		if rest > 0 and alive() then task.wait(rest) end
