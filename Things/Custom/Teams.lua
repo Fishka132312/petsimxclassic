@@ -802,8 +802,6 @@ local function petCall(uid, equip)
 		if type(lastMsg) ~= "string" then
 			lastMsg = nil
 		end
-		local via = entry and ("learned [%d] %s"):format(entry.index, entry.method) or "Library.Network.Invoke (NOT learned)"
-			name, tostring(uid), via, attempt, tostring(okI), tostring(res), tostring(msg)))
 		task.wait(0.15 * attempt)
 		if isEq(uid) == equip then
 			return true
@@ -840,7 +838,6 @@ local function unequipPets(list)
 			if okI and res ~= false and waitUntil(allOff, 2.5) then
 				return 0
 			end
-				entry.index, attempt, tostring(okI), tostring(res), #stillEquipped(list)))
 			if allOff() then
 				return 0
 			end
@@ -1636,11 +1633,6 @@ local function watchUnequipAll(tok)
 						net.equip and net.equip.index or 0, net.unequip and net.unequip.index or 0, c.index), THEME.Green)
 					return
 				end
-				local seen = {}
-				for _, c in ipairs(learnCands) do
-					seen[#seen + 1] = ("[%d]x%d"):format(c.index, c.n)
-				end
-					.. (#seen > 0 and table.concat(seen, ", ") or "нет ни одного"))
 				toast("Pets were removed, but no remote call was seen. Try again", THEME.Orange, true)
 				hist = { { now, cnt } }
 				table.clear(learnCands)
