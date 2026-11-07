@@ -58,9 +58,6 @@ local function isMoving()
 end
 
 local function turnOff(reason)
-	if _G.AutoOpenLastEgg then
-		warn("[AutoEgg] Выключено: " .. reason)
-	end
 	_G.AutoOpenLastEgg = false
 end
 
@@ -75,15 +72,9 @@ state.thread = task.spawn(function()
 		-- сообщаем, когда хук поймал вызов (после ручного открытия яйца)
 		if state.args ~= seenArgs then
 			seenArgs = state.args
-			warn("[AutoEgg] Запомнил вызов: яйцо '" .. tostring(state.args[1]) .. "', метод " .. tostring(state.method))
 		end
 
 		local on = _G.AutoOpenLastEgg and true or false
-		if on and not wasOn then
-			warn("[AutoEgg] Включено. " .. (state.args
-				and ("Повторяю: " .. tostring(state.args[1]))
-				or "Вызов ещё не пойман: открой яйцо вручную"))
-		end
 		wasOn = on
 
 		if not on then
@@ -94,10 +85,6 @@ state.thread = task.spawn(function()
 			local ev, method, args = state.event, state.method, state.args
 
 			if not (ev and method and args) then
-				if not warnedNoData then
-					warnedNoData = true
-					warn("[AutoEgg] Нет данных вызова: открой яйцо вручную один раз")
-				end
 				task.wait(0.25)
 			elseif STOP_ON_MOVE and isMoving() then
 				turnOff("движение")
@@ -112,12 +99,10 @@ state.thread = task.spawn(function()
 				if not res[1] then
 					fails += 1
 					refusals = 0
-					warn("[AutoEgg] Ошибка вызова (" .. fails .. "/" .. MAX_FAILS .. "): " .. tostring(res[2]))
 					if fails >= MAX_FAILS then stopReason = "ошибки вызова: " .. tostring(res[2]) end
 				elseif method == "InvokeServer" and res[2] == false then
 					fails = 0
 					refusals += 1
-					warn("[AutoEgg] Сервер отказал (" .. refusals .. "/" .. MAX_REFUSALS .. "): " .. tostring(res[3]))
 					if refusals >= MAX_REFUSALS then stopReason = "сервер отказывает: " .. tostring(res[3]) end
 				else
 					fails, refusals = 0, 0
@@ -164,5 +149,3 @@ table.insert(state.connections, UserInputService.InputBegan:Connect(function(inp
 		turnOff("клавиша " .. STOP_KEY.Name)
 	end
 end))
-
-warn("[AutoEgg] Готов. Открой яйцо вручную один раз, затем _G.AutoOpenLastEgg = true / false. Стоп-клавиша: " .. STOP_KEY.Name)
