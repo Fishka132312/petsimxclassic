@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------
+--------------------------------------------------------------------------------уцуй
 -- CONFIG
 --------------------------------------------------------------------------------
 local CONFIG = {
@@ -291,15 +291,15 @@ function EggTools.SetHome()
 	return false
 end
 
--- Remember the position at script launch (wait for the character if needed)
-task.spawn(function()
-	local t = 0
-	while not getRoot() and t < 15 do
-		task.wait(0.25)
-		t += 0.25
+-- Turn AFK+TP on/off. Turning it ON remembers where you are standing right now.
+function EggTools.SetAfk(value)
+	value = value and true or false
+	AutoOpen.Afk = value
+	if value then
+		if not EggTools.SetHome() then AutoOpen.Home = nil end
 	end
-	if not AutoOpen.Home then EggTools.SetHome() end
-end)
+	return value
+end
 
 -- The game's real cooldown = the egg opening animation.
 -- We count "Opening Egg" (start) and "Done Opening Egg" (end) signals, so even an
