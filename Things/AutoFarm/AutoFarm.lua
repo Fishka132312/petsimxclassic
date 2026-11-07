@@ -21,9 +21,9 @@
 --  8. Coins with Health <= 0 are released immediately, TravelGrace is shortened.
 --
 -- Usage: AutoFarm.Start(locations) / AutoFarm.Stop() / AutoFarm.SetLocation(...)
---        AutoFarm.SetCoinTypes({ "ALL: chest", "Diamonds", ... }) -- какие типы монет ломать (пусто/nil = все)
---        CoinManager.GetCoinTypes()              -- список: "ALL: категория" и "Имя без локации [категория]"
---        CoinManager.PrintTypes()                -- напечатать в консоль типы и сколько их сейчас на карте
+--        AutoFarm.SetCoinTypes({ "Chests", "Diamonds", ... })  -- какие группы монет ломать (пусто/nil = все)
+--        CoinManager.GetCoinTypes()              -- список групп: Coins, Chests, Safes, Vaults + найденные (Diamonds, Presents...)
+--        CoinManager.PrintTypes()                -- напечатать в консоль группы, какие монеты в них попали и сколько их на карте
 --------------------------------------------------------------------------------
 local CONFIG = {
 	CoinsPath = { "__THINGS", "Coins" },
@@ -116,13 +116,9 @@ local function coinTypeName(coin)
 	return tostring(coin:GetAttribute(CONFIG.NameAttr) or "Unknown")
 end
 
--- фильтр типов монет. cats - категории ("coin", "chest", "safe", "vault"...), names - имена БЕЗ названия локации
--- ("Crate", "Large Coins", "Diamonds"...). Оба nil -> ломаем все типы. Монета проходит, если подходит категория ИЛИ имя.
-local TypeFilter = { cats = nil, names = nil }
-local CAT_PREFIX = "ALL: "
-local function stripLabel(s)
-	return (tostring(s):gsub("%s*%[[^%]]*%]%s*$", ""))
-end
+-- фильтр групп монет: groups = { [normKey] = true } или nil (ломаем все группы).
+-- Группы: Coins, Chests, Safes, Vaults + то, что нашлось на карте (Diamonds, Presents, ...).
+local TypeFilter = { groups = nil }
 
 -- locations: nil (all) | "Name" | { "Name1", "Name2" } | { Name1 = true, ... }
 local function makeFilter(locations)
@@ -330,51 +326,112 @@ local function coinBaseName(coin)
 	return name
 end
 
-local function typeAllowed(coin)
-	if not TypeFilter.cats and not TypeFilter.names then return true end
-	if TypeFilter.cats and TypeFilter.cats[coinCategory(coinTypeName(coin))] then return true end
-	if TypeFilter.names and TypeFilter.names[coinBaseName(coin)] then return true end
-	return false
+-- ===== ГРУППЫ МОНЕТ =====
+-- Каждая монета попадает ровно в одну группу:
+--   1) по ключевым словам в названии (Diamonds, Presents) - они идут первыми, потому что у них своя категория в игре;
+--   2) по категории игры (landSound): coin -> Coins, chest -> Chests, safe -> Safes, vault -> Vaults;
+--   3) любая другая категория игры становится отдельной группой с её названием (lucky_block -> "Lucky Block");
+--   4) если игровой Directory недоступен - угадываем по названию, иначе "Other".
+local BASE_GROUPS = { "Coins", "Chests", "Safes", "Vaults" } -- есть в списке всегда
+local BASE_SET = {}
+for _, g in ipairs(BASE_GROUPS) do BASE_SET[g] = true end
+
+local CATEGORY_GROUP = {
+	coin = "Coins", cardboard_coin = "Coins",
+	chest = "Chests", cardboard_chest = "Chests",
+	safe = "Safes", vault = "Vaults",
+	luckyblock = "Lucky Blocks",
+}
+local NAME_GROUP = { -- { подстрока в названии (нижний регистр), группа }
+	{ "diamond", "Diamonds" },
+	{ "present", "Presents" },
+	{ "gift", "Presents" },
+}
+
+local function normKey(s)
+	local k = tostring(s):lower():gsub("[%s_%-]+", "")
+	k = k:gsub("s$", "")
+	return k
 end
 
--- список для GUI: сначала категории целиком ("ALL: chest"), потом конкретные типы без локации ("Crate [chest]")
-function CoinManager.GetCoinTypes()
-	local cats, seen, baseList = {}, {}, {}
-	for coin in pairs(CoinManager.AllCoins) do
-		local cat = coinCategory(coinTypeName(coin))
-		local base = coinBaseName(coin)
-		cats[cat] = true
-		seen[cat] = seen[cat] or {}
-		if not seen[cat][base] then
-			seen[cat][base] = true
-			baseList[#baseList + 1] = { name = base, cat = cat }
-		end
+local function prettify(s)
+	s = tostring(s):gsub("_", " ")
+	return (s:gsub("(%a)([%w]*)", function(a, b) return a:upper() .. b end))
+end
+
+local groupCache = {}  -- [полное название монеты] = { name, key }
+local knownGroups = {} -- дополнительные группы, которые уже встречались на карте (остаются в списке)
+
+local function classify(typeName)
+	local cached = groupCache[typeName]
+	if cached then return cached end
+
+	local lname = typeName:lower()
+	local group
+	for _, rule in ipairs(NAME_GROUP) do
+		if lname:find(rule[1], 1, true) then group = rule[2]; break end
+	end
+	if not group then
+		local cat = coinCategory(typeName)
+		if cat ~= "?" then
+			group = CATEGORY_GROUP[cat] or prettify(cat)
+		elseif lname:find("chest", 1, true) then group = "Chests"
+		elseif lname:find("safe", 1, true) then group = "Safes"
+		elseif lname:find("vault", 1, true) then group = "Vaults"
+		elseif lname:find("coin", 1, true) then group = "Coins"
+		else group = "Other" end
 	end
 
-	local catList = {}
-	for cat in pairs(cats) do catList[#catList + 1] = cat end
-	table.sort(catList)
-	table.sort(baseList, function(a, b)
-		if a.cat ~= b.cat then return a.cat < b.cat end
-		return a.name < b.name
-	end)
+	cached = { name = group, key = normKey(group) }
+	groupCache[typeName] = cached
+	return cached
+end
 
+local function typeAllowed(coin)
+	local groups = TypeFilter.groups
+	if not groups then return true end
+	return groups[classify(coinTypeName(coin)).key] == true
+end
+
+-- список для GUI: Coins, Chests, Safes, Vaults + найденные на карте (Diamonds, Presents, ...)
+function CoinManager.GetCoinTypes()
+	for coin in pairs(CoinManager.AllCoins) do
+		local g = classify(coinTypeName(coin)).name
+		if not BASE_SET[g] then knownGroups[g] = true end
+	end
 	local labels = {}
-	for _, cat in ipairs(catList) do labels[#labels + 1] = CAT_PREFIX .. cat end
-	for _, e in ipairs(baseList) do labels[#labels + 1] = e.name .. " [" .. e.cat .. "]" end
+	for _, g in ipairs(BASE_GROUPS) do labels[#labels + 1] = g end
+	local extra = {}
+	for g in pairs(knownGroups) do extra[#extra + 1] = g end
+	table.sort(extra)
+	for _, g in ipairs(extra) do labels[#labels + 1] = g end
 	return labels
 end
 
+-- в консоль: какие монеты в какую группу попали (удобно, если что-то оказалось не в той группе)
 function CoinManager.PrintTypes()
-	local counts, keys = {}, {}
+	local groups, order = {}, {}
 	for coin in pairs(CoinManager.AllCoins) do
-		local key = coinBaseName(coin) .. " [" .. coinCategory(coinTypeName(coin)) .. "]"
-		if not counts[key] then keys[#keys + 1] = key; counts[key] = 0 end
-		counts[key] += 1
+		local tn = coinTypeName(coin)
+		local g = classify(tn).name
+		local e = groups[g]
+		if not e then
+			e = { n = 0, names = {} }
+			groups[g] = e
+			order[#order + 1] = g
+		end
+		e.n += 1
+		local label = coinBaseName(coin) .. " <" .. coinCategory(tn) .. ">"
+		e.names[label] = (e.names[label] or 0) + 1
 	end
-	table.sort(keys)
-	for _, key in ipairs(keys) do
-		print(string.format("[Pets] %s x%d", key, counts[key]))
+	table.sort(order)
+	for _, g in ipairs(order) do
+		local e = groups[g]
+		print(string.format("[Pets] %s x%d", g, e.n))
+		local lines = {}
+		for label, n in pairs(e.names) do lines[#lines + 1] = label .. " x" .. n end
+		table.sort(lines)
+		for _, line in ipairs(lines) do print("[Pets]    " .. line) end
 	end
 end
 
@@ -800,51 +857,18 @@ function AutoFarm.Restart()
 	AutoFarm.Start(loc)
 end
 
--- types: nil / {} = ломать все типы
---   { "ALL: chest", "ALL: coin", "Crate [chest]", "Diamonds", ... }  (метки из GetCoinTypes, подходят и просто имена)
--- Неизвестные записи (опечатки, названия локаций и т.п.) игнорируются, чтобы фильтр не отсёк все монеты.
-local KNOWN_CATS = {
-	coin = true, cardboard_coin = true, chest = true, cardboard_chest = true,
-	safe = true, vault = true, special = true, luckyblock = true,
-}
-
-local function knownCategory(cat)
-	if KNOWN_CATS[cat] then return true end
-	for coin in pairs(CoinManager.AllCoins) do
-		if coinCategory(coinTypeName(coin)) == cat then return true end
-	end
-	return false
-end
-
-local function knownBaseName(name)
-	for coin in pairs(CoinManager.AllCoins) do
-		if coinBaseName(coin) == name or coinTypeName(coin) == name then return true end
-	end
-	return false
-end
-
+-- types: nil / {} = ломать все группы
+--   { "Chests", "Diamonds", "Presents", ... }  (имена из GetCoinTypes; регистр не важен, "ALL: chest" тоже понимается)
+-- Незнакомое имя группы тоже принимается: она может появиться на карте позже (например из сохранённого конфига).
 function AutoFarm.SetCoinTypes(types)
-	local cats, names, n = {}, {}, 0
+	local groups, n = {}, 0
 	local function add(entry)
-		entry = tostring(entry)
-		if string.sub(entry, 1, #CAT_PREFIX) == CAT_PREFIX then
-			local cat = string.sub(entry, #CAT_PREFIX + 1)
-			if knownCategory(cat) then
-				cats[cat] = true
-				n += 1
-			else
-				warn("[Pets] Неизвестная категория монет, пропускаю: " .. cat)
-			end
-		else
-			local name = stripLabel(entry)
-			if name == "" then return end
-			if knownBaseName(name) then
-				names[name] = true
-				n += 1
-			else
-				warn("[Pets] Неизвестный тип монеты, пропускаю: " .. name)
-			end
-		end
+		local name = (tostring(entry):gsub("^%s*[Aa][Ll][Ll]%s*:%s*", ""))
+		name = name:match("^%s*(.-)%s*$")
+		if name == "" then return end
+		local mapped = CATEGORY_GROUP[name:lower()] -- старый формат: "chest", "coin"...
+		groups[normKey(mapped or name)] = true
+		n += 1
 	end
 
 	if type(types) == "table" then
@@ -859,12 +883,7 @@ function AutoFarm.SetCoinTypes(types)
 		add(types)
 	end
 
-	if n == 0 then
-		TypeFilter.cats, TypeFilter.names = nil, nil
-	else
-		TypeFilter.cats = next(cats) and cats or nil
-		TypeFilter.names = next(names) and names or nil
-	end
+	TypeFilter.groups = (n > 0) and groups or nil
 end
 
 _G.PetTools = {
