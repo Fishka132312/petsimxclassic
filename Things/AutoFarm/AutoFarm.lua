@@ -1,26 +1,26 @@
---------------------------------------------------------------------------------11
+--------------------------------------------------------------------------------
 -- AUTOFARM v2
--- Что изменилось относительно старой версии (по скриптам игры Coins/Pets/Select Pets):
---  1. Ремоуты берутся через игровой Library.Network ("Join Coin" / "Farm Coin"),
---     так же как это делает сама игра -> больше не нужно кликать по монете вручную,
---     доп. аргументы/токены подставляет сама игра. Старый перехват оставлен как запасной.
---  2. Пропускаются монеты, которые сервер всё равно отклонит:
---     - закрытые зоны (у части "Coin" стоит атрибут PreventClick),
---     - ещё падающие монеты (нужен HasLanded),
---     - монеты с Health <= 0 (умирают).
---  3. Радиус поиска авто-подстраивается под CoinGrabDistance игры, и раз в
---     ProbeInterval секунд проверяется, не принимает ли сервер монеты дальше.
---  4. Пет подбирается ближайший к монете (как GetClosestPet в игре), а не по порядку.
---  5. Если свободных монет меньше, чем петов - лишние петы присоединяются к самым
---     "толстым" монетам (раньше стояли без дела).
---  6. Удары: пока урон не пошёл - шлём часто; когда Health начал падать - перестаём
---     спамить (игра сама шлёт "Farm Coin" один раз при прибытии). Если урон
---     встал - возобновляем; если так случилось 3 раза, скрипт сам переключается на
---     постоянные удары (как в старой версии).
---  7. Бьём только тех петов, которых сервер реально принял (по ответу Join Coin).
---  8. Монеты с Health <= 0 освобождаются сразу, TravelGrace сокращён.
+-- Changes compared to the old version (based on the game's Coins/Pets/Select Pets scripts):
+--  1. Remotes are called through the game's own Library.Network ("Join Coin" / "Farm Coin"),
+--     the same way the game does it -> no need to click a coin manually anymore,
+--     extra arguments/tokens are filled in by the game itself. The old remote hook is kept as a fallback.
+--  2. Coins the server would reject anyway are skipped:
+--     - locked zones (some "Coin" models have a PreventClick attribute),
+--     - coins that are still falling (HasLanded is required),
+--     - coins with Health <= 0 (dying).
+--  3. The search radius adapts automatically to the game's CoinGrabDistance, and every
+--     ProbeInterval seconds the script checks whether the server accepts coins farther away.
+--  4. The pet closest to the coin is picked (like GetClosestPet in the game), not in list order.
+--  5. If there are fewer free coins than pets, the extra pets join the "fattest" coins
+--     (before, they just stood idle).
+--  6. Hits: while no damage is being dealt - send them often; once Health starts dropping -
+--     stop spamming (the game itself sends "Farm Coin" once on arrival). If damage stalls -
+--     resume; if that happens 3 times, the script switches to constant hits
+--     (like the old version).
+--  7. Only pets that the server actually accepted (from the Join Coin response) are used to hit.
+--  8. Coins with Health <= 0 are released immediately, TravelGrace is shortened.
 --
--- Управление: AutoFarm.Start(локации) / AutoFarm.Stop() / AutoFarm.SetLocation(...)
+-- Usage: AutoFarm.Start(locations) / AutoFarm.Stop() / AutoFarm.SetLocation(...)
 --------------------------------------------------------------------------------
 local CONFIG = {
 	CoinsPath = { "__THINGS", "Coins" },
@@ -30,30 +30,29 @@ local CONFIG = {
 	IdAttr       = "ID",
 	OwnerAttr    = "Owner",
 
-	SearchRadius   = "auto", -- "auto" | число | math.huge (без ограничения)
-	ProbeInterval  = 15,     -- раз в N сек пробуем монету дальше текущего радиуса
-	ProbeFactor    = 1.5,    -- во сколько раз дальше пробуем
-	RequireLanded  = true,   -- брать только приземлившиеся монеты
+	SearchRadius   = "auto", -- "auto" | number | math.huge (unlimited)
+	ProbeInterval  = 15,     -- every N sec try a coin farther than the current radius
+	ProbeFactor    = 1.5,    -- how many times farther to probe
+	RequireLanded  = true,   -- only take coins that have landed
 
-	PetsPerCoin    = 1,      -- стартовое число петов на монету
-	MaxPetsPerCoin = 100,    -- потолок при добавлении лишних петов
-	JoinExtraPets  = true,   -- лишних петов отправлять на уже занятые монеты
+	PetsPerCoin    = 1,      -- initial number of pets per coin
+	MaxPetsPerCoin = 100,    -- cap when adding extra pets
+	JoinExtraPets  = true,   -- send extra pets to already occupied coins
 
-	LoopInterval   = 0.2,    -- страховочный цикл назначения (основное - по событию)
-	HitInterval    = 0.2,    -- как часто слать удары, когда они нужны
-	StallResume    = 2.5,    -- сек без падения Health -> снова слать удары
-	SendDelay      = 0.02,   -- сдвиг между назначениями
-	TravelGrace    = 10,     -- сек на дорогу: пока Health не менялся, монету не бросаем
-	StuckTimeout   = 6,      -- сек без изменения Health после начала боя -> освобождаем
-	MaxAssignTime  = 15,     -- сек на монету без атрибута Health
-	RejectCooldown = 5,      -- сек, пока отклонённая монета пропускается
-	RejectMsgCooldown = 20,  -- то же, если сервер вернул текстовую причину
-	MaxHitsPerTick = 100,    -- максимум FireServer за один тик
-
+	LoopInterval   = 0.2,    -- fallback assignment loop (the main trigger is event-based)
+	HitInterval    = 0.2,    -- how often to send hits when they are needed
+	StallResume    = 2.5,    -- sec without Health dropping -> start sending hits again
+	SendDelay      = 0.02,   -- delay between assignments
+	TravelGrace    = 10,     -- sec for travel: the coin is not dropped while Health hasn't changed
+	StuckTimeout   = 6,      -- sec without Health change after combat started -> release the coin
+	MaxAssignTime  = 15,     -- sec per coin without a Health attribute
+	RejectCooldown = 5,      -- sec a rejected coin is skipped
+	RejectMsgCooldown = 20,  -- same, if the server returned a text reason
+	MaxHitsPerTick = 100,    -- max FireServer calls per tick
 }
 
 --------------------------------------------------------------------------------
--- СЕРВИСЫ И УТИЛИТЫ
+-- SERVICES AND UTILITIES
 --------------------------------------------------------------------------------
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -66,7 +65,8 @@ if _G.PetTools then
 	if _G.PetTools.Destroy then _G.PetTools.Destroy() end
 end
 
-local warned = {}
+local learnNotified = false
+
 local function notify(text)
 	pcall(function()
 		StarterGui:SetCore("SendNotification", { Title = "Pets Farm", Text = text, Duration = 6 })
@@ -108,7 +108,7 @@ local function coinLocation(coin)
 	return tostring(coin:GetAttribute(CONFIG.LocationAttr) or "Unknown")
 end
 
--- locations: nil (все) | "Имя" | { "Имя1", "Имя2" } | { Имя1 = true, ... }
+-- locations: nil (all) | "Name" | { "Name1", "Name2" } | { Name1 = true, ... }
 local function makeFilter(locations)
 	if type(locations) == "string" then
 		return { [locations] = true }
@@ -127,9 +127,9 @@ local function makeFilter(locations)
 end
 
 --------------------------------------------------------------------------------
--- 0. СВЯЗЬ С СЕРВЕРОМ
---   Основной путь: игровой Library.Network (как в Pets/Coins скриптах игры).
---   Запасной путь: перехват настоящего вызова через hookmetamethod (клик по монете).
+-- 0. SERVER COMMUNICATION
+--   Main path: the game's Library.Network (like the game's Pets/Coins scripts).
+--   Fallback path: intercepting a real call via hookmetamethod (clicking a coin).
 --------------------------------------------------------------------------------
 local Library
 do
@@ -183,7 +183,7 @@ local function installHook()
 						_G.PetRE = self
 					end
 					if not needRF() and not needRE() then
-						task.defer(notify, "Farm Ready")
+						task.defer(notify, "Remotes saved, farm is ready")
 					end
 				end
 			end
@@ -194,7 +194,7 @@ end
 
 if not Net.useLibrary then installHook() end
 
-local function switchToHook(reason)
+local function switchToHook()
 	if not Net.useLibrary then return end
 	Net.useLibrary = false
 	installHook()
@@ -203,17 +203,17 @@ end
 local function remotesReady()
 	if Net.useLibrary then return true end
 	if not needRF() and not needRE() then
-		warned.learn = nil
+		learnNotified = false
 		return true
 	end
-	if not warned.learn then
-		warned.learn = true
-		notify("Send ur pets on breakable")
+	if not learnNotified then
+		learnNotified = true
+		notify("Click a coin once and wait a couple of seconds")
 	end
 	return false
 end
 
--- Join Coin: возвращает ok, результат ({ [uid] = true | "текст причины" })
+-- Join Coin: returns ok, result ({ [uid] = true | "reason text" })
 local function netJoin(id, pets)
 	if Net.useLibrary then
 		local ok, res = pcall(Library.Network.Invoke, "Join Coin", id, pets)
@@ -221,7 +221,7 @@ local function netJoin(id, pets)
 			Net.libOk += 1
 		else
 			Net.libFails += 1
-			if Net.libOk == 0 and Net.libFails >= 5 then switchToHook(ok and "пустой ответ" or res) end
+			if Net.libOk == 0 and Net.libFails >= 5 then switchToHook() end
 		end
 		return ok, res
 	end
@@ -235,7 +235,7 @@ local function netJoin(id, pets)
 	end)
 end
 
--- Farm Coin: удар пета по монете
+-- Farm Coin: a pet hits the coin
 local function netHit(id, petId)
 	if Net.useLibrary then
 		Library.Network.Fire("Farm Coin", id, petId)
@@ -245,7 +245,7 @@ local function netHit(id, petId)
 end
 
 --------------------------------------------------------------------------------
--- 1. МОНЕТЫ
+-- 1. COINS
 --------------------------------------------------------------------------------
 local CoinManager = { AllCoins = {}, Rejected = {}, Connections = {} }
 
@@ -287,7 +287,7 @@ function CoinManager.GetLocationNames()
 	return names
 end
 
--- пригодна ли монета для фарма (то, что сервер точно примет)
+-- is the coin suitable for farming (what the server will surely accept)
 local function coinUsable(coin)
 	if not coin.Parent then return false end
 	if coin:GetAttribute("IsFalling") == true then return false end
@@ -295,12 +295,12 @@ local function coinUsable(coin)
 	local hp = coin:GetAttribute("Health")
 	if hp ~= nil and hp <= 0 then return false end
 	local model = coin:FindFirstChild("Coin")
-	if not model then return false end -- модель ещё не создана игрой
-	if model:GetAttribute("PreventClick") then return false end -- закрытая зона
+	if not model then return false end -- model not created by the game yet
+	if model:GetAttribute("PreventClick") then return false end -- locked zone
 	return true
 end
 
--- монеты выбранных локаций (nil = все), ближайшие первыми
+-- coins of the selected locations (nil = all), closest first
 function CoinManager.GetCoins(locations, origin, radius, skip)
 	local filter = makeFilter(locations)
 	local now = os.clock()
@@ -325,7 +325,7 @@ function CoinManager.GetCoins(locations, origin, radius, skip)
 end
 
 --------------------------------------------------------------------------------
--- 2. ПЕТЫ
+-- 2. PETS
 --------------------------------------------------------------------------------
 local function isMine(pet)
 	local owner = pet:GetAttribute(CONFIG.OwnerAttr)
@@ -333,7 +333,7 @@ local function isMine(pet)
 		and (owner == LocalPlayer.Name or tostring(owner) == tostring(LocalPlayer.UserId))
 end
 
--- список { id, pos } моих петов
+-- list of { id, pos } of my pets
 local function GetEquippedPets()
 	local pets = {}
 	if not PetsFolder then return pets end
@@ -349,11 +349,10 @@ local function GetEquippedPets()
 	return pets
 end
 
--- [coin] = { id, pets (принятые), pending (отправленные, ждём ответ), accepted,
+-- [coin] = { id, pets (accepted), pending (sent, awaiting reply), accepted,
 --            assignedAt, lastHealth, lastProgress, started, quiet }
 local assignments = {}
-local stats = { accepted = 0, rejected = 0, maxDist = 0 }
-local Learn = { stalls = 0, needRepeat = false } -- самообучение режима ударов
+local Learn = { stalls = 0, needRepeat = false } -- self-learning hit mode
 local Radius = { current = nil, lastProbe = 0 }
 
 local function baseRadius()
@@ -365,7 +364,7 @@ local function baseRadius()
 	return Radius.current
 end
 
--- отправка набора петов на монету (isExtra - добавка к уже принятой монете)
+-- send a set of pets to a coin (isExtra - addition to an already accepted coin)
 local function sendPets(coin, a, pets, isExtra)
 	if #pets == 0 then return end
 	if not remotesReady() then
@@ -388,7 +387,7 @@ local function sendPets(coin, a, pets, isExtra)
 					reason = v
 				end
 			end
-			if #acc == 0 then -- неизвестный формат ключей: считаем любые true
+			if #acc == 0 then -- unknown key format: count any true
 				local n = 0
 				for _, v in pairs(res) do
 					if v == true then n += 1 elseif type(v) == "string" then reason = v end
@@ -405,18 +404,15 @@ local function sendPets(coin, a, pets, isExtra)
 				a.lastProgress = now
 				a.lastHealth = coin:GetAttribute("Health")
 			end
-			stats.accepted += 1
 			local pos, origin = getPos(coin), getRootPos()
 			if pos and origin then
 				local d = (pos - origin).Magnitude
-				if d > stats.maxDist then stats.maxDist = d end
-				-- сервер принял монету дальше радиуса -> расширяем
+				-- server accepted a coin beyond the radius -> expand it
 				if CONFIG.SearchRadius == "auto" and Radius.current and d > Radius.current then
 					Radius.current = d
 				end
 			end
 		else
-			stats.rejected += 1
 			if isExtra then
 				a.noExtraUntil = os.clock() + 10
 			elseif assignments[coin] == a and #a.pets == 0 and next(a.pending) == nil then
@@ -427,7 +423,7 @@ local function sendPets(coin, a, pets, isExtra)
 	end)
 end
 
--- Удары по принятым монетам
+-- Hits on accepted coins
 local function hitAll()
 	local now = os.clock()
 	local sent = 0
@@ -458,7 +454,7 @@ local function hitAll()
 end
 
 --------------------------------------------------------------------------------
--- 3. УПРАВЛЕНИЕ ПЕТАМИ
+-- 3. PET CONTROL
 --------------------------------------------------------------------------------
 local PetController = {}
 
@@ -479,9 +475,7 @@ end
 
 function PetController.Distribute(locations)
 	local pets = GetEquippedPets()
-	if #pets == 0 then
-		return
-	end
+	if #pets == 0 then return end
 
 	local origin = getRootPos()
 	if not origin then return end
@@ -490,7 +484,7 @@ function PetController.Distribute(locations)
 	local now = os.clock()
 	local busy = {}
 
-	-- 1) проверяем текущие назначения
+	-- 1) check current assignments
 	for coin, a in pairs(assignments) do
 		local release, penalize = false, false
 		if not coin.Parent or not getPos(coin) then
@@ -530,7 +524,7 @@ function PetController.Distribute(locations)
 	end
 	if #free == 0 then return end
 
-	-- 2) радиус (+ редкая проба монеты подальше)
+	-- 2) radius (+ rare probe of a farther coin)
 	local radius = baseRadius()
 	local probeRadius = nil
 	if CONFIG.SearchRadius == "auto" and radius ~= math.huge
@@ -551,7 +545,7 @@ function PetController.Distribute(locations)
 	end
 	if probeRadius and not probed then Radius.lastProbe = now end
 
-	-- 3) пет <-> монета: для каждой монеты (от ближних) берём ближайшего свободного пета
+	-- 3) pet <-> coin: for each coin (nearest first) take the closest free pet
 	local idx = 0
 	local perCoin = math.max(1, CONFIG.PetsPerCoin)
 	for _, item in ipairs(targets) do
@@ -586,7 +580,7 @@ function PetController.Distribute(locations)
 		end)
 	end
 
-	-- 4) лишние петы -> на самые "толстые" принятые монеты
+	-- 4) extra pets -> the "fattest" accepted coins
 	if CONFIG.JoinExtraPets and #free > 0 then
 		local cands = {}
 		for coin, a in pairs(assignments) do
@@ -606,7 +600,7 @@ function PetController.Distribute(locations)
 				local best, bestScore = nil, -1
 				for _, c in ipairs(cands) do
 					if c.load < CONFIG.MaxPetsPerCoin then
-						local score = c.hp / (c.load + 1) -- оценка времени убийства
+						local score = c.hp / (c.load + 1) -- estimated kill time
 						if score > bestScore then bestScore, best = score, c end
 					end
 				end
@@ -626,13 +620,13 @@ function PetController.Distribute(locations)
 end
 
 --------------------------------------------------------------------------------
--- 4. АВТОФАРМ
+-- 4. AUTOFARM
 --------------------------------------------------------------------------------
 local AutoFarm = { Enabled = false, Location = nil }
 local farmConnections = {}
 local runId = 0
 
-local function loop(id, interval, fn, label)
+local function loop(id, interval, fn)
 	task.spawn(function()
 		while AutoFarm.Enabled and runId == id do
 			pcall(fn)
@@ -648,14 +642,14 @@ function AutoFarm.Start(locations)
 	runId += 1
 	local id = runId
 	PetController.Reset()
-	warned.learn = nil
+	learnNotified = false
 
 	loop(id, CONFIG.LoopInterval, function()
 		PetController.Distribute(AutoFarm.Location)
-	end, "назначение")
-	loop(id, CONFIG.HitInterval, hitAll, "удары")
+	end)
+	loop(id, CONFIG.HitInterval, hitAll)
 
-	-- монета сломана/появилась -> сразу переназначаем, не ждём цикл
+	-- coin broken/spawned -> reassign right away, don't wait for the loop
 	local pending = false
 	local function quick()
 		if pending then return end
@@ -671,7 +665,7 @@ function AutoFarm.Start(locations)
 		if assignments[c] then assignments[c] = nil end
 		quick()
 	end))
-	-- игра шлёт "Remove Coin" раньше, чем папка удаляется (есть анимация исчезновения)
+	-- the game fires "Remove Coin" before the folder is removed (there's a fade-out animation)
 	if Library then
 		pcall(function()
 			table.insert(farmConnections, Library.Network.Fired("Remove Coin"):Connect(function(cid)
@@ -682,7 +676,6 @@ function AutoFarm.Start(locations)
 			end))
 		end)
 	end
-
 end
 
 function AutoFarm.Stop()
