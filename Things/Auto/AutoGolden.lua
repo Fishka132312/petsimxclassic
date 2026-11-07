@@ -12,9 +12,6 @@ local KEY, HOOK_KEY = "__AutoGolden", "__AutoGoldenHook"
 local PETS_PER_CRAFT = 6     -- минимум 5; больше = выше шанс, но дороже
 local DELAY          = 0.5   -- пауза между крафтами (сек)
 local SKIP_RARITIES  = {}    -- например { "Secret", "Mythical" } — этих не трогать
-local STOP_KEY       = Enum.KeyCode.X   -- выключить
-local TOGGLE_KEY     = Enum.KeyCode.Z   -- включить/выключить переменную
-local HOTKEYS        = false  -- false = клавиши Z/X отключены (управление только из GUI)
 -- ======================
 
 -- Выключаем прошлую копию: она перестаёт работать (цикл и подписки убираются),
@@ -29,7 +26,6 @@ if prev then
 end
 
 local RS = game:GetService("ReplicatedStorage")
-local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
 local Library = require(RS:WaitForChild("Framework"):WaitForChild("Library"))
@@ -137,11 +133,7 @@ local function craftStep()
 		n = #rows
 		for i = #chosen, n + 1, -1 do chosen[i] = nil end
 	end
-	local row = rows[math.min(n, #rows)]
 	for _, uid in ipairs(chosen) do used[uid] = true end
-
-	warn(string.format("[AutoGolden] %s x%d | шанс %s%% | цена %s",
-		group.name, n, tostring(row.chance), tostring(row.cost)))
 
 	Library.Variables.UsingMachine = true
 	local res = table.pack(pcall(function()
@@ -153,13 +145,10 @@ local function craftStep()
 	if res[1] and res[2] then
 		crafts += 1
 		fails = 0
-		warn("[AutoGolden] Крафт принят сервером (всего: " .. crafts .. ")")
 	else
 		fails += 1
 		badGroups[key] = true
-		warn("[AutoGolden] Отказ. Ответ:", tostring(res[1]), tostring(res[2]), tostring(res[3]))
 		if fails >= 3 then
-			warn("[AutoGolden] 3 отказа подряд — пауза 10 сек (проверь валюту).")
 			fails = 0
 			task.wait(10)
 			used, badGroups = {}, {}
@@ -172,7 +161,6 @@ end
 -- Главный цикл: работает всегда, но крафтит только при _G.AutoGoldenCraft = true
 state.thread = task.spawn(function()
 	local wasOn = false
-	local warnedNoRemote = false
 
 	while state.active do
 		local on = _G.AutoGoldenCraft and true or false
@@ -180,41 +168,25 @@ state.thread = task.spawn(function()
 		if on and not wasOn then
 			used, badGroups = {}, {}
 			crafts, fails = 0, 0
-			warn("[AutoGolden] Включено. Выключить: _G.AutoGoldenCraft = false" .. (HOTKEYS and (" или " .. STOP_KEY.Name) or ""))
-		elseif wasOn and not on then
-			warn("[AutoGolden] Выключено. Крафтов за запуск: " .. crafts)
 		end
 		wasOn = on
 
 		if not on then
 			state.running = false
-			warnedNoRemote = false
 			task.wait(0.1)
 		elseif not state.remote then
 			state.running = false
-			if not warnedNoRemote then
-				warnedNoRemote = true
-				warn("[AutoGolden] Remote ещё не пойман: сделай ОДИН крафт вручную (ОК + подтверждение)")
-			end
 			task.wait(0.25)
 		else
 			state.running = true
-			local ok, err = pcall(craftStep)
+			local ok = pcall(craftStep)
 			if not ok then
 				Library.Variables.UsingMachine = false
-				warn("[AutoGolden] Ошибка шага: " .. tostring(err))
 				task.wait(1)
 			end
 		end
 	end
 end)
-
-function state.onCaptured()
-	local remote = state.remote
-	local idx = table.find(RS:GetChildren(), remote)
-	warn("[AutoGolden] Remote пойман: индекс " .. tostring(idx) .. " | " .. remote:GetFullName())
-	warn("[AutoGolden] Чтобы крафтить: _G.AutoGoldenCraft = true")
-end
 
 -- хук ставится один раз за сессию; ловит только вызов, который игра делает внутри Convert()
 -- (читает актуальный state из env, поэтому повторный запуск его не дублирует)
@@ -228,25 +200,9 @@ if not env[HOOK_KEY] then
 				local vars = Library.Variables
 				if vars and vars.UsingMachine and type((...)) == "table" then
 					s.remote = self
-					task.defer(s.onCaptured)
 				end
 			end
 		end
 		return old(self, ...)
 	end))
-end
-
-if HOTKEYS then table.insert(state.connections, UIS.InputBegan:Connect(function(input, processed)
-	if processed then return end
-	if input.KeyCode == STOP_KEY then
-		_G.AutoGoldenCraft = false
-	elseif input.KeyCode == TOGGLE_KEY then
-		_G.AutoGoldenCraft = not _G.AutoGoldenCraft
-	end
-end)) end
-
-if state.remote then
-	warn("[AutoGolden] Remote уже известен. Включи: _G.AutoGoldenCraft = true" .. (HOTKEYS and (" (или клавиша " .. TOGGLE_KEY.Name .. ")") or ""))
-else
-	warn("[AutoGolden] Готов. Сделай ОДИН крафт вручную (ОК + подтверждение), затем _G.AutoGoldenCraft = true")
 end
