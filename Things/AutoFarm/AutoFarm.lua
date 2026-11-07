@@ -50,9 +50,6 @@ local CONFIG = {
 	RejectMsgCooldown = 20,  -- то же, если сервер вернул текстовую причину
 	MaxHitsPerTick = 100,    -- максимум FireServer за один тик
 
-	Stats         = false,
-	StatsInterval = 10,
-	Debug         = false,
 }
 
 --------------------------------------------------------------------------------
@@ -70,13 +67,6 @@ if _G.PetTools then
 end
 
 local warned = {}
-local function warnOnce(key, text)
-	if not warned[key] then
-		warned[key] = true
-		warn(text)
-	end
-end
-
 local function notify(text)
 	pcall(function()
 		StarterGui:SetCore("SendNotification", { Title = "Pets Farm", Text = text, Duration = 6 })
@@ -199,7 +189,6 @@ local function installHook()
 			end
 			return old(self, ...)
 		end))
-	else
 	end
 end
 
@@ -372,7 +361,6 @@ local function baseRadius()
 	if not Radius.current then
 		local d = Library and Library.Settings and Library.Settings.CoinGrabDistance
 		Radius.current = (type(d) == "number" and d > 0) and d or math.huge
-		dbg("стартовый радиус:", Radius.current)
 	end
 	return Radius.current
 end
@@ -409,10 +397,6 @@ local function sendPets(coin, a, pets, isExtra)
 			end
 		end
 
-		if CONFIG.Debug then
-				a.id, #pets, #acc, reason and ("(" .. reason .. ")") or ""))
-		end
-
 		if #acc > 0 then
 			local now = os.clock()
 			for _, id in ipairs(acc) do a.pets[#a.pets + 1] = id end
@@ -429,7 +413,6 @@ local function sendPets(coin, a, pets, isExtra)
 				-- сервер принял монету дальше радиуса -> расширяем
 				if CONFIG.SearchRadius == "auto" and Radius.current and d > Radius.current then
 					Radius.current = d
-					dbg("радиус расширен до", math.floor(d))
 				end
 			end
 		else
@@ -460,7 +443,6 @@ local function hitAll()
 					Learn.stalls += 1
 					if Learn.stalls >= 3 and not Learn.needRepeat then
 						Learn.needRepeat = true
-						dbg("урон идёт только при повторных ударах -> постоянный режим")
 					end
 				end
 			end
@@ -569,9 +551,6 @@ function PetController.Distribute(locations)
 	end
 	if probeRadius and not probed then Radius.lastProbe = now end
 
-	dbg(string.format("петов %d (свободно %d), доступно монет %d, радиус %s",
-		#pets, #free, #targets, tostring(math.floor(radius))))
-
 	-- 3) пет <-> монета: для каждой монеты (от ближних) берём ближайшего свободного пета
 	local idx = 0
 	local perCoin = math.max(1, CONFIG.PetsPerCoin)
@@ -656,8 +635,7 @@ local runId = 0
 local function loop(id, interval, fn, label)
 	task.spawn(function()
 		while AutoFarm.Enabled and runId == id do
-			local ok, err = pcall(fn)
-			if not ok then end
+			pcall(fn)
 			task.wait(interval)
 		end
 	end)
@@ -685,8 +663,7 @@ function AutoFarm.Start(locations)
 		task.defer(function()
 			pending = false
 			if AutoFarm.Enabled and runId == id then
-				local ok, err = pcall(PetController.Distribute, AutoFarm.Location)
-				if not ok then end
+				pcall(PetController.Distribute, AutoFarm.Location)
 			end
 		end)
 	end
@@ -706,15 +683,6 @@ function AutoFarm.Start(locations)
 		end)
 	end
 
-	if CONFIG.Stats then
-		loop(id, CONFIG.StatsInterval, function()
-			local n = 0
-			for _ in pairs(assignments) do n += 1 end
-				stats.accepted, stats.rejected, math.floor(stats.maxDist),
-				tostring(Radius.current and math.floor(Radius.current) or "-"), n,
-				Learn.needRepeat and "постоянный" or "авто"))
-		end, "статистика")
-	end
 end
 
 function AutoFarm.Stop()
