@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------кувв
+--------------------------------------------------------------------------------вв
 -- AUTOFARM v2 + выбор типов монет (AutoFarm.SetCoinTypes)в
 -- Changes compared to the old version (based on the game's Coins/Pets/Select Pets scripts):
 --  1. Remotes are called through the game's own Library.Network ("Join Coin" / "Farm Coin"),
