@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----вф
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----вфвв
 local CheatName = "Evade"
 
 local Players = game:GetService("Players")
@@ -199,6 +199,32 @@ if DEBUG then
 	for k, v in pairs(LocationDropdown) do dprint("dropdown:", k, typeof(v)) end
 end
 
+-- ===== ВЫБОР ТИПОВ МОНЕТ =====
+-- Ничего не выбрано = ломаем все типы. В скобках категория из игры: coin, chest, safe, vault, luckyblock...
+local function getTypeItems()
+	local tools = _G.PetTools
+	if tools and tools.CoinManager and tools.CoinManager.GetCoinTypes then
+		return tools.CoinManager.GetCoinTypes()
+	end
+	return {}
+end
+
+local CoinTypeDropdown = AutoFarmSection:Dropdown({
+	Name = "Coin Types",
+	Tooltip = "Choose which coin types to break (nothing selected = all)",
+	Flag = "FarmCoinTypes",
+	Items = getTypeItems(),
+	Multi = true,
+	Callback = function(Value)
+		local list = normalize(Value)
+		dprint("типы монет:", table.concat(list, ", "))
+		local tools = _G.PetTools
+		if tools and tools.AutoFarm and tools.AutoFarm.SetCoinTypes then
+			tools.AutoFarm.SetCoinTypes(list)
+		end
+	end
+})
+
 local PetsFarmToggle = AutoFarmSection:Toggle({
 	Name = "Pets Auto Farm",
 	Tooltip = "Sends pets to coins in selected locations",
@@ -242,6 +268,20 @@ task.spawn(function()
 		if sig ~= last and #items > 0 then
 			last = sig
 			pushItems(LocationDropdown, items)
+		end
+	end
+end)
+
+-- Автообновление списка типов монет
+task.spawn(function()
+	local last = table.concat(getTypeItems(), "|")
+	while true do
+		task.wait(5)
+		local items = getTypeItems()
+		local sig = table.concat(items, "|")
+		if sig ~= last and #items > 0 then
+			last = sig
+			pushItems(CoinTypeDropdown, items)
 		end
 	end
 end)
