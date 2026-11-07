@@ -660,7 +660,7 @@ EggSection:Toggle({
 
 EggSection:Toggle({
 	Name = "AFK + TP",
-	Tooltip = "Remembers where you stand when turned on; hops to the egg only to buy, then returns and waits for the cooldown",
+	Tooltip = "Remembers your spot: TP to egg > buy > back > 0.5s > TP to egg > wait until opened > back > repeat",
 	Flag = "EggAfkTp",
 	Default = false,
 	Callback = function(Value)
