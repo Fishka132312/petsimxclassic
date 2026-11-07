@@ -660,12 +660,30 @@ EggSection:Toggle({
 
 EggSection:Toggle({
 	Name = "AFK + TP",
-	Tooltip = "Remembers your spot: TP to egg > buy > back > 0.5s > TP to egg > wait until opened > back > repeat",
+	Tooltip = "Remembers where you stand when turned on; hops to the egg only to buy, then returns and waits for the cooldown",
 	Flag = "EggAfkTp",
 	Default = false,
 	Callback = function(Value)
 		local tools = _G.EggTools
 		if tools then tools.SetAfk(Value) end
+	end
+})
+
+EggSection:Slider({
+	Name = "AFK arrive wait",
+	Tooltip = "AFK + TP: pause at the egg before buying. Lower = faster. Raises itself automatically if the server rejects purchases",
+	Flag = "EggAfkArrive",
+	Min = 0.02,
+	Max = 0.5,
+	Default = 0.05,
+	Decimals = 0.01,
+	Suffix = " s",
+	Callback = function(Value)
+		local tools = _G.EggTools
+		if tools and tools.Config then
+			tools.Config.AfkArriveWait = Value
+			if tools.ResetAfkTuning then tools.ResetAfkTuning() end
+		end
 	end
 })
 
