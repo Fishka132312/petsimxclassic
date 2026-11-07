@@ -52,7 +52,6 @@ local DEBUG                = false
 
 local CoinsFolder = Library.Things:WaitForChild("Coins", 15)
 if not CoinsFolder then
-    warn("[AntiLag4] Не найдена папка Coins")
     return
 end
 
@@ -150,7 +149,6 @@ local function patchAudio()
     end)
     if not ok then
         audioOrig = nil
-        warn("[AntiLag4] Не удалось пропатчить Audio.Play")
     end
 end
 
@@ -324,13 +322,11 @@ local function startSession()
                 task.wait(5)
                 local total = 0
                 for _ in pairs(info) do total += 1 end
-                print(string.format("[AntiLag4] коинов всего: %d | вынесено: %d | в workspace: %d",
                     total, nStored, #CoinsFolder:GetChildren()))
             end
         end)
     end
 
-    print("[AntiLag4] включён, радиус", FAR_DISTANCE)
 end
 
 local function stopSession()
@@ -341,7 +337,6 @@ local function stopSession()
     restoreParticles()
     restoreCoins(false)
     revertProps(false)
-    print("[AntiLag4] выключен: всё возвращено")
 end
 
 -- ================== ПЕРЕКЛЮЧАТЕЛЬ ==================
@@ -371,5 +366,3 @@ _G[CLEANUP] = function()
     restoreCoins(true)
     revertProps(true)
 end
-
-print(("[AntiLag4] загружен. Включить: _G.%s = true, выключить: _G.%s = false"):format(FLAG, FLAG))
