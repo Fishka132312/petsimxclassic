@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----вфв
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----ку
 local CheatName = "Evade"
 
 local Players = game:GetService("Players")
@@ -537,6 +537,124 @@ MaxHitsSlider = FarmSettings:Slider({
 	Decimals = 1,
 	Callback = function(Value)
 		setCfg("MaxHitsPerTick", math.floor(Value))
+	end
+})
+
+-- ===== SMART FARM =====
+-- Логика в AutoFarm.lua (_G.PetTools.Smart). Работает поверх Pets Auto Farm и твоих локаций/типов монет.
+local function smartTools()
+	local t = _G.PetTools
+	return t and t.Smart
+end
+
+local SmartSection = EventPage:Section({
+	Name = "Smart Farm",
+	Description = "Self-learning farm mode",
+	Side = 1,
+	Icon = "https://i.postimg.cc/tCDF4BRx/Bez-imeni-1.png"
+})
+
+SmartSection:Paragraph({
+	Name = "How it works",
+	Text = "Tests different ways to farm (which coins first, how many pets per coin), measures how much coin HP you break per second and keeps the best one. Uses the locations and coin types you selected. While it is on, Pets per coin is controlled by Smart Farm."
+})
+
+SmartSection:Divider()
+
+SmartSection:Toggle({
+	Name = "Smart Farm",
+	Tooltip = "Turn on together with Pets Auto Farm. Needs a minute or two to find the best strategy",
+	Flag = "SmartFarm",
+	Default = false,
+	Callback = function(Value)
+		local smart = smartTools()
+		if not smart then
+			Library:Notification({
+				Title = "Smart Farm",
+				Description = "AutoFarm.lua is outdated (no Smart Farm). Update it on GitHub",
+				Duration = 5
+			})
+			return
+		end
+		if Value then
+			smart.Start()
+			local tools = _G.PetTools
+			if tools and tools.AutoFarm and not tools.AutoFarm.Enabled then
+				Library:Notification({
+					Title = "Smart Farm",
+					Description = "Now turn on Pets Auto Farm",
+					Duration = 4
+				})
+			end
+		else
+			smart.Stop()
+		end
+	end
+})
+
+local SmartInfo = SmartSection:Paragraph({
+	Name = "Status",
+	Text = "Smart Farm is off"
+})
+
+task.spawn(function()
+	local last = ""
+	while true do
+		task.wait(1)
+		local smart = smartTools()
+		local text = smart and smart.GetStatus and smart.GetStatus() or "Smart Farm not loaded"
+		if text ~= last then
+			last = text
+			pcall(function() SmartInfo:SetText(text) end)
+		end
+	end
+end)
+
+SmartSection:Divider()
+
+SmartSection:Slider({
+	Name = "Test duration",
+	Tooltip = "Seconds for testing each strategy (first 6 s are warm-up). Longer = more accurate",
+	Flag = "SmartTrialTime",
+	Min = 12,
+	Max = 60,
+	Default = 25,
+	Decimals = 1,
+	Suffix = " s",
+	Callback = function(Value)
+		local smart = smartTools()
+		if smart then smart.TrialTime = Value end
+	end
+})
+
+SmartSection:Slider({
+	Name = "Re-check every",
+	Tooltip = "How often it tries the other strategies again to see if something got better",
+	Flag = "SmartRecheck",
+	Min = 60,
+	Max = 900,
+	Default = 300,
+	Decimals = 1,
+	Suffix = " s",
+	Callback = function(Value)
+		local smart = smartTools()
+		if smart then smart.RecheckEvery = Value end
+	end
+})
+
+SmartSection:Button({
+	Name = "Re-test now",
+	Tooltip = "Throws away the results and runs the whole search again",
+	Callback = function()
+		local smart = smartTools()
+		if smart and smart.Enabled then
+			smart.Retest()
+			Library:Notification({
+				Title = "Smart Farm",
+				Description = "Search will restart after the current test",
+				Duration = 3
+			})
+		end
 	end
 })
 
