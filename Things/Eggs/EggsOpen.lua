@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------вф
+--------------------------------------------------------------------------------уцуй
 -- CONFIG
 --------------------------------------------------------------------------------
 local CONFIG = {
@@ -9,6 +9,7 @@ local CONFIG = {
 	AfkAttempts      = 8,    -- AFK+TP: how many purchase attempts at the egg before giving up and going back
 	AfkRetryWait     = 0.05, -- AFK+TP: pause between attempts at the egg
 	AfkStartWait     = 1,    -- AFK+TP: max wait for the animation-start signal after a purchase
+	AfkMinCycle      = 0.4,  -- AFK+TP: minimum time of one full cycle (egg -> buy -> home). Needed with No Egg Animation, where the game's cooldown is ~0 and the teleports get too fast. Lower = faster
 	AfkCooldownCap   = 0.5,  -- AFK+TP: wait for the animation at Home at most this long, then go to the egg anyway (the game lets you buy earlier than the animation ends). Lower = faster, but more failed attempts
 	AfkEggOffset     = Vector3.new(0, 3, 6), -- AFK+TP: where to stand relative to the egg center
 }
@@ -400,6 +401,7 @@ local function afkOpenOnce(eggId, amount, token)
 		return false, "Egg not found on the map"
 	end
 
+	local cycleStart = os.clock()
 	toEgg(center)
 
 	local ok, msg = false, "no attempt"
@@ -432,6 +434,9 @@ local function afkOpenOnce(eggId, amount, token)
 	if ok then
 		-- stand at Home until the animation (cooldown) is over
 		waitCooldown(startBefore, token)
+		-- keep a minimum cycle time (instant animation = no natural cooldown)
+		local rest = CONFIG.AfkMinCycle - (os.clock() - cycleStart)
+		if rest > 0 and alive() then task.wait(rest) end
 	end
 	return ok, msg
 end
