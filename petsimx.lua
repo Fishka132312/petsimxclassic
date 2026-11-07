@@ -20,9 +20,7 @@ local scripts = {
   'Auto/AutoRainbow.lua',
   'Auto/AutoIndex.lua',
   'Misc/AntiLag.lua',
-  'Misc/AntiLag2.lua',
-  'Misc/AntiLag3.lua',
-  'Misc/AntiLag4.lua',
+  'Misc/AntiLagDa.lua'
   'Custom/Teams.lua',
   'Custom/PetChanger.lua',
 }
@@ -1102,9 +1100,9 @@ PerfSection:Paragraph({
 PerfSection:Divider()
 
 PerfSection:Toggle({
-	Name = "Anti Lag 1",
-	Tooltip = "Lag reduction, level 1",
-	Flag = "AntiLag1",
+	Name = "Anti Lag",
+	Tooltip = "Lag reduction",
+	Flag = "AntiLag",
 	Default = false,
 	Callback = function(Value)
 		_G.AntiLagEnabled = Value
@@ -1113,31 +1111,11 @@ PerfSection:Toggle({
 
 PerfSection:Toggle({
 	Name = "Anti Lag 2",
-	Tooltip = "Lag reduction, level 2",
+	Tooltip = "Removes things on map",
 	Flag = "AntiLag2",
 	Default = false,
 	Callback = function(Value)
-		_G.AntiLag2Enabled = Value
-	end
-})
-
-PerfSection:Toggle({
-	Name = "Anti Lag 3",
-	Tooltip = "Lag reduction, level 3",
-	Flag = "AntiLag3",
-	Default = false,
-	Callback = function(Value)
-		_G.AntiLag3Enabled = Value
-	end
-})
-
-PerfSection:Toggle({
-	Name = "Anti Lag 4",
-	Tooltip = "Lag reduction, level 4 (strongest)",
-	Flag = "AntiLag4",
-	Default = false,
-	Callback = function(Value)
-		_G.AntiLag4Enabled = Value
+		_G.AntiLagEnabled1 = Value
 	end
 })
 
