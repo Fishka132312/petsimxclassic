@@ -9,9 +9,9 @@ local CONFIG = {
 	AfkAttempts      = 8,    -- AFK+TP: how many purchase attempts at the egg before giving up and going back
 	AfkRetryWait     = 0.05, -- AFK+TP: pause between attempts at the egg
 	AfkStartWait     = 1,    -- AFK+TP: max wait for the animation-start signal after a purchase
-	AfkMinCycle      = 0.4,  -- AFK+TP: minimum time of one full cycle (egg -> buy -> home). Needed with No Egg Animation, where the game's cooldown is ~0 and the teleports get too fast. Lower = faster
-	AfkCooldownMax   = 25,   -- AFK+TP: max wait for the egg-opening animation to finish
-	AfkHomeWait      = 0.4,  -- AFK+TP: minimum time to stand at Home after buying, before going to the egg again (on top of waiting for the animation). Lower = faster
+	AfkMinCycle      = 0.35,  -- AFK+TP: minimum time of one full cycle (egg -> buy -> home). Needed with No Egg Animation, where the game's cooldown is ~0 and the teleports get too fast. Lower = faster
+	AfkCooldownMax   = 2,   -- AFK+TP: max wait for the egg-opening animation to finish
+	AfkHomeWait      = 0.35,  -- AFK+TP: minimum time to stand at Home after buying, before going to the egg again (on top of waiting for the animation). Lower = faster
 	AfkEggOffset     = Vector3.new(0, 3, 6), -- AFK+TP: where to stand relative to the egg center
 	AfkArriveWindow  = 0.3,  -- AFK+TP: how long (sec, + ping) to retry at the egg after arriving. After that a refusal = "cooldown not over" -> go Home right away
 	AfkCdMargin      = 0.1,  -- AFK+TP: safety margin added to the learned cooldown
