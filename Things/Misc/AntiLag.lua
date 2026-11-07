@@ -69,6 +69,10 @@ local EFFECTS  = { "ParticleEmitter", "Trail", "Beam", "Fire", "Smoke", "Sparkle
 local LIGHTS   = { "PointLight", "SpotLight", "SurfaceLight" }
 local CLOTHES  = { "Shirt", "Pants", "ShirtGraphic" }
 
+-- Свойства, которые нельзя менять на лету: для них не используем sethiddenproperty,
+-- иначе движок спамит "Cannot change ... during Run-Time"
+local NO_HIDDEN = { RenderFidelity = true }
+
 -- ================== СОСТОЯНИЕ ==================
 local alive, active = true, false
 local connections = {}
@@ -78,6 +82,7 @@ local processed = setmetatable({}, { __mode = "k" })
 local enforced  = setmetatable({}, { __mode = "k" })
 local removed   = {}   -- { obj, parent } снятые объекты
 local envSaved  = {}   -- { inst, prop, value, hidden } освещение, террейн, настройки
+local failedProps = {} -- ["ClassName.Prop"] = true — свойство у этого класса не меняется, больше не пробуем
 local fpsOriginal
 local queue, running = {}, false
 
@@ -90,20 +95,28 @@ local function isAny(obj, list)
 end
 
 local function setProp(obj, prop, value)
+    local key = obj.ClassName .. "." .. prop
+    if failedProps[key] then return false end
+
     local ok = pcall(function() obj[prop] = value end)
-    if not ok and sethiddenproperty then
+    if not ok and sethiddenproperty and not NO_HIDDEN[prop] then
         ok = pcall(sethiddenproperty, obj, prop, value)
+    end
+    if not ok then
+        failedProps[key] = true
     end
     return ok
 end
 
--- поставить значение, запомнив исходное (только при первом изменении)
+-- поставить значение, запомнив исходное (только при первом изменении и только если запись удалась)
 local function setSaved(obj, prop, value)
     local ok, cur = pcall(function() return obj[prop] end)
-    if not ok and gethiddenproperty then
+    if not ok and gethiddenproperty and not NO_HIDDEN[prop] then
         ok, cur = pcall(gethiddenproperty, obj, prop)
     end
     if ok and cur == value then return true end
+
+    if not setProp(obj, prop, value) then return false end
 
     if ok then
         local s = saved[obj]
@@ -113,7 +126,7 @@ local function setSaved(obj, prop, value)
         end
         if s[prop] == nil then s[prop] = cur end
     end
-    return setProp(obj, prop, value)
+    return true
 end
 
 -- то же для не-объектов мира (Lighting, Terrain, settings)
@@ -179,7 +192,7 @@ local function enforce(obj, prop)
     e[prop] = true
 
     pcall(function()
-        obj:GetPropertyChangedSignal(prop):Connect(function()
+        local conn = obj:GetPropertyChangedSignal(prop):Connect(function()
             if not (alive and active) then return end
             local cur = obj[prop]
             if cur ~= "" then
@@ -188,6 +201,7 @@ local function enforce(obj, prop)
                 setProp(obj, prop, "")
             end
         end)
+        connections[#connections + 1] = conn -- чтобы отключалось при выгрузке
     end)
 end
 
@@ -201,7 +215,10 @@ local function stripMeshPart(part)
         setSaved(part, "MeshId", "")
         enforce(part, "MeshId")
     end
-    setSaved(part, "RenderFidelity", Enum.RenderFidelity.Performance)
+    -- RenderFidelity только у настоящих MeshPart (у юнионов/SolidModel нельзя менять на лету)
+    if part.ClassName == "MeshPart" then
+        setSaved(part, "RenderFidelity", Enum.RenderFidelity.Performance)
+    end
     if CFG.SIMPLE_PHYSICS then
         setSaved(part, "CollisionFidelity", Enum.CollisionFidelity.Box)
     end
@@ -209,7 +226,7 @@ end
 
 local function stripPart(part, coin)
     if part:IsA("Terrain") then return end
-    local isMesh = part:IsA("MeshPart")
+    local isMesh = part.ClassName == "MeshPart"
 
     if not processed[part] then
         processed[part] = true
@@ -217,10 +234,14 @@ local function stripPart(part, coin)
         setSaved(part, "Reflectance", 0)
         setSaved(part, "Material", Enum.Material.SmoothPlastic)
         setSaved(part, "MaterialVariant", "")
-        if isMesh then stripMeshPart(part) end
+        if isMesh then
+            stripMeshPart(part)
+        elseif CFG.SIMPLE_PHYSICS and part:IsA("PartOperation") then
+            setSaved(part, "CollisionFidelity", Enum.CollisionFidelity.Box)
+        end
     end
 
-    if (isMesh and CFG.HIDE_ALL_MESHES) or (coin and CFG.HIDE_COINS) then
+    if ((isMesh or part:IsA("PartOperation")) and CFG.HIDE_ALL_MESHES) or (coin and CFG.HIDE_COINS) then
         setSaved(part, "LocalTransparencyModifier", 1)
         setSaved(part, "Transparency", 1)
     end
@@ -459,7 +480,6 @@ local function scan()
         handle(obj)
         if i % CFG.BATCH == 0 then RunService.Heartbeat:Wait() end
     end
-    print(("Анти-лаг: очистка завершена (%d объектов)"):format(#list))
 end
 
 task.spawn(function()
@@ -472,7 +492,6 @@ task.spawn(function()
         elseif not want and active then
             active = false
             revertAll(false)
-            print("Анти-лаг выключен: всё возвращено")
         end
         task.wait(0.2)
     end
@@ -486,5 +505,3 @@ _G[CLEANUP] = function()
     table.clear(connections)
     revertAll(true)
 end
-
-print(("Анти-лаг загружен. Включить: _G.%s = true, выключить: _G.%s = false"):format(FLAG, FLAG))
