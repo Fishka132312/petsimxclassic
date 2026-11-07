@@ -43,7 +43,6 @@ local BATCH             = 400    -- объектов за кадр при отк
 
 local PetsFolder = Library.Things:WaitForChild("Pets", 15)
 if not PetsFolder then
-    warn("[AntiLag3] Не найдена папка Pets")
     return
 end
 
@@ -141,7 +140,6 @@ local function patchEffects()
     end)
     if not ok then
         effectsOrig = nil
-        warn("[AntiLag3] Не удалось отключить PetCmds.Effects")
     end
 end
 
@@ -189,7 +187,6 @@ local function startSession()
     -- ===== Эффекты =====
     if NO_EFFECTS then patchEffects() end
 
-    print("[AntiLag3] включён")
 end
 
 local function stopSession()
@@ -198,7 +195,6 @@ local function stopSession()
     table.clear(conns)
     unpatchEffects()
     revertAll(false)
-    print("[AntiLag3] выключен: всё возвращено")
 end
 
 -- ================== ПЕРЕКЛЮЧАТЕЛЬ ==================
@@ -226,5 +222,3 @@ _G[CLEANUP] = function()
     unpatchEffects()
     revertAll(true)
 end
-
-print(("[AntiLag3] загружен. Включить: _G.%s = true, выключить: _G.%s = false"):format(FLAG, FLAG))
