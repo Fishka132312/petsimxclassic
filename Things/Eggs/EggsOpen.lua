@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------уцуй
+--------------------------------------------------------------------------------ыы
 -- CONFIG
 --------------------------------------------------------------------------------
 local CONFIG = {
@@ -13,6 +13,9 @@ local CONFIG = {
 	AfkCooldownMax   = 25,   -- AFK+TP: max wait for the egg-opening animation to finish
 	AfkHomeWait      = 0.6,  -- AFK+TP: minimum time to stand at Home after buying, before going to the egg again (on top of waiting for the animation). Lower = faster
 	AfkEggOffset     = Vector3.new(0, 3, 6), -- AFK+TP: where to stand relative to the egg center
+	AfkArriveWindow  = 0.3,  -- AFK+TP: how long (sec, + ping) to retry at the egg after arriving. After that a refusal = "cooldown not over" -> go Home right away
+	AfkCdMargin      = 0.1,  -- AFK+TP: safety margin added to the learned cooldown
+	AfkCdPrecision   = 0.15, -- AFK+TP: stop refining the cooldown when it is known this precisely
 }
 
 --------------------------------------------------------------------------------
@@ -357,18 +360,88 @@ end
 
 -- After a successful purchase: wait for OUR animation to start, then (almost) to finish.
 -- `startBefore` = startCount right before the purchase call.
+-- Returns true if our animation actually started (= the purchase really went through).
 local function waitCooldown(startBefore, token)
 	local t = os.clock()
 	local function alive() return AutoOpen.Enabled and AutoOpen.Token == token end
+	local started = true
 	if signalsHooked then
 		while startCount <= startBefore and not isOpening()
 			and os.clock() - t < 1 and alive() do
 			RunService.Heartbeat:Wait()
 		end
+		started = (startCount > startBefore) or isOpening()
 	else
 		task.wait(0.15)
 	end
 	waitAnimEnd(alive)
+	return started
+end
+
+--------------------------------------------------------------------------------
+-- AFK+TP: LEARNING THE REAL PURCHASE COOLDOWN
+-- The end of the animation is NOT the end of the server cooldown, so the cooldown
+-- is learned from the purchases themselves (time since the previous purchase):
+--   success after X sec -> cooldown <= X (upper)
+--   refusal after X sec -> cooldown >  X (lower)
+-- We stand at Home until "last purchase + cooldown" and only then hop to the egg.
+-- Values are kept in env per egg+amount, so a script restart doesn't reset them.
+--------------------------------------------------------------------------------
+local CdStore = env.__EggCdV1
+if not CdStore then
+	CdStore = {}
+	env.__EggCdV1 = CdStore
+end
+
+local function cdGet(eggId, amount)
+	local key = tostring(eggId) .. "#" .. tostring(amount)
+	local cd = CdStore[key]
+	if not cd then
+		cd = { last = nil, lower = 0, upper = nil }
+		CdStore[key] = cd
+	end
+	return cd
+end
+
+-- how many seconds after the last purchase to try again
+local function cdTarget(cd)
+	if not cd.last then return 0 end
+	local lo, up = cd.lower, cd.upper
+	if up then
+		if up - lo <= CONFIG.AfkCdPrecision then
+			return up + CONFIG.AfkCdMargin -- learned
+		end
+		return (lo + up) / 2 -- still refining: try in the middle
+	end
+	if lo <= 0 then return 0 end -- nothing known yet
+	return math.max(lo * 1.5, lo + 0.5) -- only refusals so far: try later
+end
+
+local function cdOnSuccess(cd, callTime)
+	if cd.last then
+		local e = callTime - cd.last
+		if not cd.upper or e < cd.upper then cd.upper = e end
+		if cd.lower >= cd.upper then
+			cd.lower = math.max(0, cd.upper - CONFIG.AfkCdPrecision)
+		end
+	end
+	cd.last = callTime
+end
+
+-- returns true if the refusal looks like "cooldown not over yet"
+local function cdOnRefuse(cd, callTime)
+	if not cd.last then return false end -- never bought yet: real failure (money, locked egg...)
+	local e = callTime - cd.last
+	if e >= CONFIG.AfkCooldownMax then return false end
+	if e > cd.lower then cd.lower = e end
+	if cd.upper and cd.lower >= cd.upper then
+		if cd.lower > cd.upper + 0.5 then
+			cd.upper = nil -- cooldown became longer - learn it again
+		else
+			cd.upper = cd.lower + 0.2 -- just ping jitter
+		end
+	end
+	return true
 end
 
 local function goHome()
@@ -394,7 +467,8 @@ local function toEgg(center)
 	return true
 end
 
--- One AFK cycle: Home -> egg -> buy (quick retries) -> Home -> wait for cooldown
+-- One AFK cycle: wait at Home until the cooldown is over -> egg -> buy -> Home
+-- Returns ok, msg, isCooldown (refused only because the cooldown wasn't over yet)
 local function afkOpenOnce(eggId, amount, token)
 	local function alive() return AutoOpen.Enabled and AutoOpen.Token == token end
 
@@ -403,9 +477,19 @@ local function afkOpenOnce(eggId, amount, token)
 		return false, "Character not ready"
 	end
 
-	-- a previous animation still running? give it a moment while we are still at Home
+	-- 1) at Home: a previous animation still running? wait for it
 	if animActive() then
 		waitAnimEnd(alive)
+		if not alive() then return false, "stopped" end
+	end
+
+	-- 2) at Home: wait until the (learned) cooldown is over. Don't go to the egg too early.
+	local cd = cdGet(eggId, amount)
+	if cd.last then
+		local readyAt = cd.last + cdTarget(cd)
+		while os.clock() < readyAt and alive() do
+			task.wait(math.min(0.1, readyAt - os.clock()))
+		end
 		if not alive() then return false, "stopped" end
 	end
 
@@ -414,17 +498,25 @@ local function afkOpenOnce(eggId, amount, token)
 		return false, "Egg not found on the map"
 	end
 
+	-- 3) hop to the egg and buy. Retry only for a short moment (position replication),
+	--    NOT until the cooldown ends - that's what kept you standing at the egg.
+	local ping = 0
+	pcall(function() ping = LocalPlayer:GetNetworkPing() end)
 	local cycleStart = os.clock()
 	toEgg(center)
 
 	local ok, msg = false, "no attempt"
 	local startBefore = startCount
+	local callTime = os.clock()
+	local deadline = os.clock() + CONFIG.AfkArriveWindow + ping * 2
 	for attempt = 1, CONFIG.AfkAttempts do
 		startBefore = startCount
+		callTime = os.clock()
 		local okCall, a, b = pcall(EggTools.OpenOnce, eggId, amount)
 		if okCall then ok, msg = a, b else ok, msg = false, tostring(a) end
 		if ok then break end
 		if not alive() then break end
+		if os.clock() >= deadline then break end
 		local r = getRoot()
 		if r and (r.Position - center.Position).Magnitude > 12 then
 			toEgg(center) -- got pushed away / rubber-banded
@@ -432,30 +524,35 @@ local function afkOpenOnce(eggId, amount, token)
 		task.wait(CONFIG.AfkRetryWait)
 	end
 
-	if ok then
-		-- FireServer returns instantly: give the packet time to reach the server before we leave the egg
-		if Captured.method == "FireServer" then
-			local ping = 0
-			pcall(function() ping = LocalPlayer:GetNetworkPing() end)
-			task.wait(ping * 0.5 + 0.05)
-		end
+	if ok and Captured.method == "FireServer" then
+		-- FireServer returns instantly: give the packet time to reach the server before we leave
+		task.wait(ping * 0.5 + 0.05)
 	end
 
-	-- always go back, even if the purchase failed
+	-- 4) always go back, even if the purchase failed
 	goHome()
 	local homeSince = os.clock()
 
 	if ok then
-		-- stand at Home until the animation (cooldown) is over
-		waitCooldown(startBefore, token)
-		-- sit at Home at least AfkHomeWait before the next trip to the egg
+		-- stand at Home until the animation is over
+		local started = waitCooldown(startBefore, token)
+		if not started and Captured.method == "FireServer" and signalsHooked then
+			-- FireServer can't report a refusal; no animation = the server refused
+			ok, msg = false, "no animation (refused)"
+		end
+	end
+
+	if ok then
+		cdOnSuccess(cd, callTime)
 		local homeRest = CONFIG.AfkHomeWait - (os.clock() - homeSince)
 		if homeRest > 0 and alive() then task.wait(homeRest) end
-		-- keep a minimum cycle time (instant animation = no natural cooldown)
 		local rest = CONFIG.AfkMinCycle - (os.clock() - cycleStart)
 		if rest > 0 and alive() then task.wait(rest) end
+		return true, msg, false
 	end
-	return ok, msg
+
+	local isCd = cdOnRefuse(cd, callTime)
+	return false, msg, isCd
 end
 
 function AutoOpen.Start(eggId, amount)
@@ -498,9 +595,9 @@ function AutoOpen.Start(eggId, amount)
 			end
 
 			local amountNow = AutoOpen.Amount
-			local ok, msg
+			local ok, msg, isCd
 			if AutoOpen.Afk then
-				ok, msg = afkOpenOnce(id, amountNow, token)
+				ok, msg, isCd = afkOpenOnce(id, amountNow, token)
 			else
 				ok, msg = EggTools.OpenOnce(id, amountNow)
 			end
@@ -508,6 +605,10 @@ function AutoOpen.Start(eggId, amount)
 				fails = 0
 				AutoOpen.Opened = AutoOpen.Opened + (tonumber(amountNow) or 1)
 				task.wait(math.max(0.05, AutoOpen.Delay))
+			elseif isCd then
+				-- AFK+TP: cooldown simply wasn't over. Not an error: we are already at Home,
+				-- the next cycle waits there with the corrected cooldown.
+				task.wait(0.05)
 			else
 				fails = fails + 1
 				if fails >= CONFIG.MaxFailures then
