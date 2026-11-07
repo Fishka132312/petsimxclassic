@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----вфвв
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----вф
 local CheatName = "Evade"
 
 local Players = game:GetService("Players")
@@ -161,14 +161,30 @@ local function getLocationItems()
 	return tools and tools.CoinManager.GetLocationNames() or {}
 end
 
--- Ждём, пока появятся локации (монеты могут прогрузиться не сразу)
+local function getTypeItems()
+	local tools = _G.PetTools
+	if tools and tools.CoinManager and tools.CoinManager.GetCoinTypes then
+		return tools.CoinManager.GetCoinTypes()
+	end
+	return {}
+end
+
+-- Ждём, пока монеты загрузятся: списки локаций и типов должны появиться и 2 сек не меняться (максимум 20 сек)
 do
-	local waited = 0
-	while #getLocationItems() == 0 and waited < 15 do
+	local waited, stable, last = 0, 0, ""
+	while waited < 20 do
+		local sig = table.concat(getLocationItems(), "|") .. "##" .. table.concat(getTypeItems(), "|")
+		if #getLocationItems() > 0 and sig == last then
+			stable += 0.5
+			if stable >= 2 then break end
+		else
+			stable = 0
+			last = sig
+		end
 		task.wait(0.5)
 		waited += 0.5
 	end
-	dprint("локаций на старте:", #getLocationItems())
+	dprint("локаций на старте:", #getLocationItems(), "| типов монет:", #getTypeItems())
 end
 
 local LocationDropdown = AutoFarmSection:Dropdown({
@@ -201,12 +217,16 @@ end
 
 -- ===== ВЫБОР ТИПОВ МОНЕТ =====
 -- Ничего не выбрано = ломаем все типы. В скобках категория из игры: coin, chest, safe, vault, luckyblock...
-local function getTypeItems()
+do
 	local tools = _G.PetTools
-	if tools and tools.CoinManager and tools.CoinManager.GetCoinTypes then
-		return tools.CoinManager.GetCoinTypes()
+	if not (tools and tools.CoinManager and tools.CoinManager.GetCoinTypes) then
+		warn("[GUI] В загруженном AutoFarm.lua нет GetCoinTypes: на GitHub лежит старая версия, залей новую")
+		Library:Notification({
+			Title = "Pets Farm",
+			Description = "AutoFarm.lua is outdated (no coin types). Update it on GitHub",
+			Duration = 6
+		})
 	end
-	return {}
 end
 
 local CoinTypeDropdown = AutoFarmSection:Dropdown({
@@ -224,6 +244,8 @@ local CoinTypeDropdown = AutoFarmSection:Dropdown({
 		end
 	end
 })
+
+dprint("Coin Types items:", table.concat(getTypeItems(), ", "))
 
 local PetsFarmToggle = AutoFarmSection:Toggle({
 	Name = "Pets Auto Farm",
@@ -268,20 +290,6 @@ task.spawn(function()
 		if sig ~= last and #items > 0 then
 			last = sig
 			pushItems(LocationDropdown, items)
-		end
-	end
-end)
-
--- Автообновление списка типов монет
-task.spawn(function()
-	local last = table.concat(getTypeItems(), "|")
-	while true do
-		task.wait(5)
-		local items = getTypeItems()
-		local sig = table.concat(items, "|")
-		if sig ~= last and #items > 0 then
-			last = sig
-			pushItems(CoinTypeDropdown, items)
 		end
 	end
 end)
