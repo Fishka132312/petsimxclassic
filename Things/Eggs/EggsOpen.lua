@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------ыы
+--------------------------------------------------------------------------------ыы22
 -- CONFIG
 --------------------------------------------------------------------------------
 local CONFIG = {
@@ -16,6 +16,10 @@ local CONFIG = {
 	AfkArriveWindow  = 0.3,  -- AFK+TP: how long (sec, + ping) to retry at the egg after arriving. After that a refusal = "cooldown not over" -> go Home right away
 	AfkCdMargin      = 0.1,  -- AFK+TP: safety margin added to the learned cooldown
 	AfkCdPrecision   = 0.15, -- AFK+TP: stop refining the cooldown when it is known this precisely
+	AfkSpamMax       = 15,   -- AFK+TP: if the server says "too fast", keep spamming at the egg for at most this many seconds (then go Home)
+	MoneyPoll        = 0.5,  -- how often (sec) to check the balance while waiting for money
+	MoneyMargin      = 1.01, -- wait until balance >= price * amount * this (the price on the egg is rounded)
+	MoneyWords       = { "enough", "afford", "insufficient", "not enough", "need more", "too poor" }, -- parts of the server's "no money" message (lowercase)
 }
 
 --------------------------------------------------------------------------------
@@ -444,6 +448,72 @@ local function cdOnRefuse(cd, callTime)
 	return true
 end
 
+
+--------------------------------------------------------------------------------
+-- MONEY: how much the player has / how much the egg costs
+-- balance = Lib.Save.Get()[currency]   (same thing FarmStats reads from the GUI)
+-- price   = number on the egg's PriceHUD.EggCost.Amount (shortened like "1.5M", so approximate)
+--------------------------------------------------------------------------------
+local MULT = { K = 1e3, M = 1e6, B = 1e9, T = 1e12, QA = 1e15, QI = 1e18, SX = 1e21, SP = 1e24, OC = 1e27, NO = 1e30, DC = 1e33 }
+local function parseShort(text)
+	text = tostring(text):gsub("<[^>]->", ""):gsub("[,%s]", "")
+	local num, suf = text:match("^([%d%.]+)(%a*)")
+	num = tonumber(num)
+	if not num then return nil end
+	if suf ~= "" then
+		local m = MULT[suf:upper()]
+		if m then num = num * m end
+	end
+	return num
+end
+
+-- returns balance, pricePerOne (either can be nil if unknown)
+local function moneyInfo(eggId)
+	local lib = getLib()
+	local balance, price
+	pcall(function()
+		local def = lib.Directory.Eggs[eggId]
+		local save = lib.Save.Get()
+		if def and save then balance = tonumber(save[def.currency]) end
+	end)
+	local egg = nearestEgg(eggId)
+	if egg then
+		pcall(function()
+			local hud = egg:FindFirstChild("PriceHUD")
+			local cost = hud and hud:FindFirstChild("EggCost")
+			local lbl = cost and cost:FindFirstChild("Amount")
+			if lbl then price = parseShort(lbl.Text) end
+		end)
+	end
+	return balance, price, egg
+end
+
+-- true = enough money, false = not enough, nil = can't tell
+local function affordable(eggId, amount, margin)
+	local balance, price, egg = moneyInfo(eggId)
+	if balance and price then
+		return balance >= price * (tonumber(amount) or 1) * (margin or 1)
+	end
+	local ca = egg and egg:GetAttribute("CanAfford") -- the game's own flag (for 1 egg)
+	if ca ~= nil and (tonumber(amount) or 1) <= 1 then return ca and true or false end
+	return nil
+end
+
+local lastRefuseMsg
+local function isMoneyRefusal(msg, eggId, amount)
+	local text = tostring(msg or ""):lower()
+	if text ~= lastRefuseMsg then
+		lastRefuseMsg = text
+		print("[Eggs] server refused: " .. tostring(msg)) -- so you can see the real texts
+	end
+	local a = affordable(eggId, amount)
+	if a == false then return true end
+	for _, w in ipairs(CONFIG.MoneyWords) do
+		if text:find(w, 1, true) then return true end
+	end
+	return false
+end
+
 local function goHome()
 	local home = AutoOpen.Home
 	local r = getRoot()
@@ -468,7 +538,7 @@ local function toEgg(center)
 end
 
 -- One AFK cycle: wait at Home until the cooldown is over -> egg -> buy -> Home
--- Returns ok, msg, isCooldown (refused only because the cooldown wasn't over yet)
+-- Returns ok, msg, isCooldown, isMoney
 local function afkOpenOnce(eggId, amount, token)
 	local function alive() return AutoOpen.Enabled and AutoOpen.Token == token end
 
@@ -493,13 +563,19 @@ local function afkOpenOnce(eggId, amount, token)
 		if not alive() then return false, "stopped" end
 	end
 
+	-- 2b) no money -> don't even go to the egg, just wait here
+	if affordable(eggId, amount) == false then
+		return false, "not enough money", false, true
+	end
+
 	local egg, center = nearestEgg(eggId)
 	if not (egg and center) then
 		return false, "Egg not found on the map"
 	end
 
-	-- 3) hop to the egg and buy. Retry only for a short moment (position replication),
-	--    NOT until the cooldown ends - that's what kept you standing at the egg.
+	-- 3) hop to the egg and buy.
+	--    "too fast" (cooldown) -> DON'T go Home, keep spamming the purchase right here until it goes through.
+	--    "not enough money"    -> go Home and wait for money (handled by the caller).
 	local ping = 0
 	pcall(function() ping = LocalPlayer:GetNetworkPing() end)
 	local cycleStart = os.clock()
@@ -508,14 +584,20 @@ local function afkOpenOnce(eggId, amount, token)
 	local ok, msg = false, "no attempt"
 	local startBefore = startCount
 	local callTime = os.clock()
-	local deadline = os.clock() + CONFIG.AfkArriveWindow + ping * 2
-	for attempt = 1, CONFIG.AfkAttempts do
+	local moneyRefused, lastIsCd = false, false
+	local deadline = os.clock() + CONFIG.AfkSpamMax
+	while true do
 		startBefore = startCount
 		callTime = os.clock()
 		local okCall, a, b = pcall(EggTools.OpenOnce, eggId, amount)
 		if okCall then ok, msg = a, b else ok, msg = false, tostring(a) end
 		if ok then break end
 		if not alive() then break end
+		if isMoneyRefusal(msg, eggId, amount) then
+			moneyRefused = true
+			break
+		end
+		lastIsCd = cdOnRefuse(cd, callTime)
 		if os.clock() >= deadline then break end
 		local r = getRoot()
 		if r and (r.Position - center.Position).Magnitude > 12 then
@@ -529,7 +611,7 @@ local function afkOpenOnce(eggId, amount, token)
 		task.wait(ping * 0.5 + 0.05)
 	end
 
-	-- 4) always go back, even if the purchase failed
+	-- 4) opened or no money (or gave up) -> go back to the spot
 	goHome()
 	local homeSince = os.clock()
 
@@ -548,11 +630,25 @@ local function afkOpenOnce(eggId, amount, token)
 		if homeRest > 0 and alive() then task.wait(homeRest) end
 		local rest = CONFIG.AfkMinCycle - (os.clock() - cycleStart)
 		if rest > 0 and alive() then task.wait(rest) end
-		return true, msg, false
+		return true, msg, false, false
 	end
 
-	local isCd = cdOnRefuse(cd, callTime)
-	return false, msg, isCd
+	return false, msg, lastIsCd, moneyRefused
+end
+
+-- Stand still (at Home in AFK mode) until the player can afford the egg.
+local function waitForMoney(eggId, amount, token, afk)
+	local function alive() return AutoOpen.Enabled and AutoOpen.Token == token end
+	if afk then goHome() end
+	notify("Not enough money - waiting at the spot")
+	AutoOpen.WaitingMoney = true
+	while alive() do
+		local a = affordable(eggId, amount, CONFIG.MoneyMargin)
+		if a == true then break end
+		task.wait(a == nil and 3 or CONFIG.MoneyPoll) -- can't tell the balance: re-check slowly, the loop will just try to buy
+		if a == nil then break end
+	end
+	AutoOpen.WaitingMoney = false
 end
 
 function AutoOpen.Start(eggId, amount)
@@ -595,13 +691,18 @@ function AutoOpen.Start(eggId, amount)
 			end
 
 			local amountNow = AutoOpen.Amount
-			local ok, msg, isCd
+			local ok, msg, isCd, isMoney
 			if AutoOpen.Afk then
-				ok, msg, isCd = afkOpenOnce(id, amountNow, token)
+				ok, msg, isCd, isMoney = afkOpenOnce(id, amountNow, token)
 			else
 				ok, msg = EggTools.OpenOnce(id, amountNow)
+				if not ok then isMoney = isMoneyRefusal(msg, id, amountNow) end
 			end
-			if ok then
+			if not ok and isMoney then
+				-- not enough currency: stand at the chosen spot until it accumulates (not a failure)
+				fails = 0
+				waitForMoney(id, amountNow, token, AutoOpen.Afk)
+			elseif ok then
 				fails = 0
 				AutoOpen.Opened = AutoOpen.Opened + (tonumber(amountNow) or 1)
 				task.wait(math.max(0.05, AutoOpen.Delay))
