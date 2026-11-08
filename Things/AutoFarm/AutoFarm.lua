@@ -58,6 +58,11 @@ local CONFIG = {
 	-- Ключ = название монеты (с локацией или без, регистр не важен), значение = "Small" | "Medium" | "Large"
 	-- пример: ChestSizeOverrides = { ["Giant Rainbow Chest"] = "Medium", ["Mystic Chest"] = "Large" }
 	ChestSizeOverrides = {},
+
+	-- ТЕЛЕПОРТЫ (AFK+TP из EggsOpen): если персонаж сместился больше чем на столько студов,
+	-- отказы сервера ("далеко" и т.п.) считаются устаревшими и монеты пробуются заново сразу.
+	RejectMoveDist = 25,
+	Debug = false, -- true = печатать в консоль отказы сервера (PetTools.Config.Debug = true)
 }
 
 --------------------------------------------------------------------------------
@@ -67,6 +72,7 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local StarterGui = game:GetService("StarterGui")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 if _G.PetTools then
@@ -264,7 +270,7 @@ end
 --------------------------------------------------------------------------------
 -- 1. COINS
 --------------------------------------------------------------------------------
-local CoinManager = { AllCoins = {}, Rejected = {}, Connections = {} }
+local CoinManager = { AllCoins = {}, Rejected = {}, RejectedAt = {}, Connections = {} }
 
 for _, c in ipairs(CoinsFolder:GetChildren()) do
 	CoinManager.AllCoins[c] = true
@@ -275,17 +281,23 @@ end))
 table.insert(CoinManager.Connections, CoinsFolder.ChildRemoved:Connect(function(c)
 	CoinManager.AllCoins[c] = nil
 	CoinManager.Rejected[c] = nil
+	CoinManager.RejectedAt[c] = nil
 end))
 
+-- отказ запоминает, ГДЕ стоял игрок: после телепорта (AFK+TP) отказ уже не действует
 function CoinManager.Reject(coin, seconds)
 	CoinManager.Rejected[coin] = os.clock() + (seconds or CONFIG.RejectCooldown)
+	CoinManager.RejectedAt[coin] = getRootPos()
 end
 
 function CoinManager.IsRejected(coin, now)
 	local untilT = CoinManager.Rejected[coin]
 	if not untilT then return false end
-	if now >= untilT then
+	local at = CoinManager.RejectedAt[coin]
+	local cur = at and getRootPos()
+	if now >= untilT or (at and cur and (cur - at).Magnitude > CONFIG.RejectMoveDist) then
 		CoinManager.Rejected[coin] = nil
+		CoinManager.RejectedAt[coin] = nil
 		return false
 	end
 	return true
@@ -673,6 +685,12 @@ local function sendPets(coin, a, pets, isExtra)
 			if isExtra then
 				a.noExtraUntil = os.clock() + 10
 			elseif assignments[coin] == a and #a.pets == 0 and next(a.pending) == nil then
+				if CONFIG.Debug then
+					local pos, origin = getPos(coin), getRootPos()
+					print(string.format("[Pets] отказ: %s | причина: %s | дистанция: %s",
+						coinTypeName(coin), tostring(reason or (ok and "пустой ответ" or "ошибка вызова")),
+						(pos and origin) and tostring(math.floor((pos - origin).Magnitude)) or "?"))
+				end
 				assignments[coin] = nil
 				CoinManager.Reject(coin, reason and CONFIG.RejectMsgCooldown or CONFIG.RejectCooldown)
 			end
@@ -929,6 +947,20 @@ function AutoFarm.Start(locations)
 	table.insert(farmConnections, CoinsFolder.ChildRemoved:Connect(function(c)
 		if assignments[c] then assignments[c] = nil end
 		quick()
+	end))
+	-- новая монета/сундук: сразу пробуем (и ещё раз после приземления, пока она "падает")
+	table.insert(farmConnections, CoinsFolder.ChildAdded:Connect(function()
+		task.delay(0.1, quick)
+		task.delay(0.5, quick)
+		task.delay(1.2, quick)
+	end))
+	-- телепорт (AFK+TP): игрок оказался в другом месте -> сразу раздаём петов заново,
+	-- не дожидаясь следующего тика цикла (на яйце игрок стоит доли секунды)
+	local lastPos = getRootPos()
+	table.insert(farmConnections, RunService.Heartbeat:Connect(function()
+		local p = getRootPos()
+		if p and lastPos and (p - lastPos).Magnitude > CONFIG.RejectMoveDist then quick() end
+		if p then lastPos = p end
 	end))
 	-- the game fires "Remove Coin" before the folder is removed (there's a fade-out animation)
 	if Library then
