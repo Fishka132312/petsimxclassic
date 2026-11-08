@@ -53,6 +53,11 @@ local CONFIG = {
 	RejectCooldown = 5,      -- sec a rejected coin is skipped
 	RejectMsgCooldown = 20,  -- same, if the server returned a text reason
 	MaxHitsPerTick = 100,    -- max FireServer calls per tick
+
+	-- ручная правка размера сундука, если авто-определение ошиблось.
+	-- Ключ = название монеты (с локацией или без, регистр не важен), значение = "Small" | "Medium" | "Large"
+	-- пример: ChestSizeOverrides = { ["Giant Rainbow Chest"] = "Medium", ["Mystic Chest"] = "Large" }
+	ChestSizeOverrides = {},
 }
 
 --------------------------------------------------------------------------------
@@ -363,50 +368,97 @@ local groupCache = {}  -- [полное название монеты] = { name,
 local knownGroups = {} -- дополнительные группы, которые уже встречались на карте (остаются в списке)
 
 -- ===== РАЗМЕР СУНДУКОВ =====
--- 1) по словам в названии: Mini/Tiny/Small, Medium, Large/Big/Huge/Giant/Mega;
--- 2) если слов нет - по максимальному здоровью: самые слабые = Small, самые крепкие = Large.
+-- Порядок:
+--   1) ручной список CONFIG.ChestSizeOverrides;
+--   2) целое СЛОВО в названии (без названия локации!): Mini/Tiny/Small, Medium, Large/Big/Huge/Giant/Mega;
+--   3) если слов нет - сравниваем здоровье ТОЛЬКО с другими сундуками той же локации.
+--      "Large" по здоровью даём только если в локации есть минимум 3 размера (иначе это скорее Medium).
 local SIZE_WORDS = {
 	{ "mini", "Small" }, { "tiny", "Small" }, { "small", "Small" },
 	{ "medium", "Medium" },
 	{ "large", "Large" }, { "big", "Large" }, { "huge", "Large" }, { "giant", "Large" }, { "mega", "Large" },
 }
-local chestHp = {}     -- [название сундука без слов-размеров] = макс. увиденное здоровье
-local sizeByHp = {}    -- [название] = "Small" | "Medium" | "Large"
-local sizeDirty = false
+local chestHp = {}   -- [локация][название без локации] = макс. увиденное здоровье (только сундуки без слова-размера)
+local sizeByHp = {}  -- [локация][название без локации] = "Small" | "Medium" | "Large"
+local wordCache = {} -- [локация|название] = "Small" | "Medium" | "Large" | false
+local hpDirty = {}
 
-local function rebuildHpSizes()
-	sizeDirty = false
-	table.clear(sizeByHp)
+local function stripArea(typeName, area)
+	local prefix = area .. " "
+	if area ~= "Unknown" and #typeName > #prefix and typeName:sub(1, #prefix):lower() == prefix:lower() then
+		return typeName:sub(#prefix + 1)
+	end
+	return typeName
+end
+
+local function sizeFromText(typeName, area)
+	local key = area .. "|" .. typeName
+	local cached = wordCache[key]
+	if cached ~= nil then return cached end
+
+	local result = false
+	-- 1) ручные правки
+	for name, size in pairs(CONFIG.ChestSizeOverrides or {}) do
+		local n = tostring(name):lower()
+		if n == typeName:lower() or n == stripArea(typeName, area):lower() then
+			result = tostring(size):sub(1, 1):upper() .. tostring(size):sub(2):lower()
+			break
+		end
+	end
+	-- 2) слова (целиком, без названия локации)
+	if not result then
+		local base = stripArea(typeName, area):lower()
+		local padded = " " .. (base:gsub("[^%a]+", " ")) .. " "
+		for _, rule in ipairs(SIZE_WORDS) do
+			if padded:find(" " .. rule[1] .. " ", 1, true) or padded:find(" " .. rule[1] .. "s ", 1, true) then
+				result = rule[2]
+				break
+			end
+		end
+	end
+	wordCache[key] = result
+	return result
+end
+
+local function rebuildHpSizes(area)
+	hpDirty[area] = false
+	local sizes = {}
+	sizeByHp[area] = sizes
 	local list = {}
-	for tn, hp in pairs(chestHp) do list[#list + 1] = { name = tn, hp = hp } end
+	for base, hp in pairs(chestHp[area] or {}) do list[#list + 1] = { name = base, hp = hp } end
 	table.sort(list, function(a, b) return a.hp < b.hp end)
 	local n = #list
 	for i, e in ipairs(list) do
 		local size = "Medium"
-		if n > 1 then
+		if n == 2 then
+			size = (i == 1) and "Small" or "Medium"
+		elseif n >= 3 then
 			local r = (i - 1) / (n - 1)
 			size = r < 0.34 and "Small" or (r > 0.66 and "Large" or "Medium")
 		end
-		sizeByHp[e.name] = size
+		sizes[e.name] = size
 	end
 end
 
 local function chestGroup(typeName, coin)
-	local l = typeName:lower()
-	for _, rule in ipairs(SIZE_WORDS) do
-		if l:find(rule[1], 1, true) then return rule[2] .. " Chests" end
-	end
+	local area = coin and coinLocation(coin) or "Unknown"
+	local size = sizeFromText(typeName, area)
+	if size then return size .. " Chests" end
+
+	local base = stripArea(typeName, area)
 	local hp = coin and coin:GetAttribute("Health")
 	if type(hp) ~= "number" then hp = nil end
-	if chestHp[typeName] == nil then
-		chestHp[typeName] = hp or 0
-		sizeDirty = true
-	elseif hp and hp > chestHp[typeName] then
-		chestHp[typeName] = hp
-		sizeDirty = true
+	chestHp[area] = chestHp[area] or {}
+	local areaHp = chestHp[area]
+	if areaHp[base] == nil then
+		areaHp[base] = hp or 0
+		hpDirty[area] = true
+	elseif hp and hp > areaHp[base] then
+		areaHp[base] = hp
+		hpDirty[area] = true
 	end
-	if sizeDirty then rebuildHpSizes() end
-	return (sizeByHp[typeName] or "Medium") .. " Chests"
+	if hpDirty[area] or not sizeByHp[area] then rebuildHpSizes(area) end
+	return (sizeByHp[area][base] or "Medium") .. " Chests"
 end
 
 local function classify(typeName, coin)
@@ -473,7 +525,11 @@ function CoinManager.PrintTypes()
 			order[#order + 1] = g
 		end
 		e.n += 1
-		local label = coinBaseName(coin) .. " <" .. coinCategory(tn) .. ">"
+		local label = coinLocation(coin) .. " / " .. coinBaseName(coin) .. " <" .. coinCategory(tn) .. ">"
+		if g:find("Chests", 1, true) then
+			local hp = chestHp[coinLocation(coin)] and chestHp[coinLocation(coin)][coinBaseName(coin)]
+			label = label .. (hp and (" hp~" .. math.floor(hp)) or " (размер по слову/правке)")
+		end
 		e.names[label] = (e.names[label] or 0) + 1
 	end
 	table.sort(order)
