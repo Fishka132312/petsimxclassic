@@ -1,4 +1,4 @@
---------------------------------------------------------------------------------вв
+--------------------------------------------------------------------------------3123131
 -- AUTOFARM v2 + выбор типов монет (AutoFarm.SetCoinTypes)в
 -- Changes compared to the old version (based on the game's Coins/Pets/Select Pets scripts):
 --  1. Remotes are called through the game's own Library.Network ("Join Coin" / "Farm Coin"),
@@ -66,7 +66,7 @@ local CONFIG = {
 
 	-- СТОРОЖ: если есть монеты, которые можно фармить, а ни одна не теряет здоровье дольше стольких секунд -
 	-- скрипт сам делает то же, что ты делаешь руками (выкл/вкл фарма). 0 = выключено.
-	WatchdogTimeout  = 12,
+	WatchdogTimeout  = 0,
 	WatchdogInterval = 1,
 }
 
