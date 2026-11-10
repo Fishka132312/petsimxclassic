@@ -63,6 +63,11 @@ local CONFIG = {
 	-- отказы сервера ("далеко" и т.п.) считаются устаревшими и монеты пробуются заново сразу.
 	RejectMoveDist = 25,
 	Debug = false, -- true = печатать в консоль отказы сервера (PetTools.Config.Debug = true)
+
+	-- СТОРОЖ: если есть монеты, которые можно фармить, а ни одна не теряет здоровье дольше стольких секунд -
+	-- скрипт сам делает то же, что ты делаешь руками (выкл/вкл фарма). 0 = выключено.
+	WatchdogTimeout  = 12,
+	WatchdogInterval = 1,
 }
 
 --------------------------------------------------------------------------------
@@ -240,7 +245,9 @@ end
 local function netJoin(id, pets)
 	if Net.useLibrary then
 		local ok, res = pcall(Library.Network.Invoke, "Join Coin", id, pets)
-		if ok and type(res) == "table" then
+		if ok then
+			-- вызов дошёл до сервера. Ответ nil/false (монета уже исчезла, мир сменился) - это НЕ поломка библиотеки:
+			-- раньше 5 таких ответов подряд навсегда переключали фарм на режим "кликни монету".
 			Net.libOk += 1
 		else
 			Net.libFails += 1
@@ -593,6 +600,17 @@ function CoinManager.GetCoins(locations, origin, radius, skip)
 	return list
 end
 
+-- есть ли вообще монеты под выбранные локации/типы (отказы сервера не учитываем)
+function CoinManager.HasFarmable(locations)
+	local filter = makeFilter(locations)
+	for coin in pairs(CoinManager.AllCoins) do
+		if (not filter or filter[coinLocation(coin)]) and typeAllowed(coin) and coinUsable(coin) and getPos(coin) then
+			return true
+		end
+	end
+	return false
+end
+
 --------------------------------------------------------------------------------
 -- 2. PETS
 --------------------------------------------------------------------------------
@@ -623,6 +641,7 @@ end
 local assignments = {}
 local Learn = { stalls = 0, needRepeat = true } -- true = бить постоянно, как в старой версии
 local Radius = { current = nil, lastProbe = 0 }
+local lastProgressAt = os.clock() -- когда у какой-либо монеты последний раз упало здоровье (для сторожа)
 
 local function baseRadius()
 	if CONFIG.SearchRadius ~= "auto" then return CONFIG.SearchRadius end
@@ -743,6 +762,7 @@ local function trackProgress(coin, a, now)
 		if a.accepted then a.started = true end
 		a.lastHealth = hp
 		a.lastProgress = now
+		lastProgressAt = now
 		a.quiet = false
 	end
 	return hp
@@ -918,6 +938,19 @@ local function loop(id, key, fn)
 	end)
 end
 
+-- сторож: "монеты есть, а фарм стоит" -> то же, что выкл/вкл (сброс назначений, отказов, радиуса, режима связи)
+local function watchdog()
+	local limit = tonumber(CONFIG.WatchdogTimeout) or 0
+	if limit <= 0 then return end
+	local now = os.clock()
+	if now - lastProgressAt < limit then return end
+	lastProgressAt = now -- следующая проверка не раньше чем через limit секунд
+	if not CoinManager.HasFarmable(AutoFarm.Location) then return end -- монет нет - стоять нормально
+	if CONFIG.Debug then print("[Pets] сторож: монеты есть, прогресса нет - перезапуск фарма") end
+	Radius.current = nil
+	AutoFarm.Restart()
+end
+
 function AutoFarm.Start(locations)
 	if AutoFarm.Enabled then return end
 	AutoFarm.Enabled = true
@@ -926,11 +959,15 @@ function AutoFarm.Start(locations)
 	local id = runId
 	PetController.Reset()
 	learnNotified = false
+	lastProgressAt = os.clock()
+	Net.libFails = 0
+	if Library and not Net.useLibrary then Net.useLibrary = true end -- пробуем игровую библиотеку заново
 
 	loop(id, "LoopInterval", function()
 		PetController.Distribute(AutoFarm.Location)
 	end)
 	loop(id, "HitInterval", hitAll)
+	loop(id, "WatchdogInterval", watchdog)
 
 	-- coin broken/spawned -> reassign right away, don't wait for the loop
 	local pending = false
@@ -945,7 +982,7 @@ function AutoFarm.Start(locations)
 		end)
 	end
 	table.insert(farmConnections, CoinsFolder.ChildRemoved:Connect(function(c)
-		if assignments[c] then assignments[c] = nil end
+		if assignments[c] then assignments[c] = nil; lastProgressAt = os.clock() end -- монету сломали = прогресс
 		quick()
 	end))
 	-- новая монета/сундук: сразу пробуем (и ещё раз после приземления, пока она "падает")
