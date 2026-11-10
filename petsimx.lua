@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----вф
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Fishka132312/MeowlGui/refs/heads/main/source/library.lua"))() -----13213
 local CheatName = "Evade"
 
 local Players = game:GetService("Players")
@@ -128,8 +128,13 @@ local function applyFarm()
 	task.delay(0.5, function()
 		if my ~= restartToken then return end
 		local t = _G.PetTools
-		if t and t.AutoFarm and t.AutoFarm.Enabled and t.AutoFarm.Restart then
+		if not (t and t.AutoFarm and t.AutoFarm.Enabled) then return end
+		if t.AutoFarm.Restart then
 			pcall(t.AutoFarm.Restart)
+		else
+			local loc = t.AutoFarm.Location
+			t.AutoFarm.Stop()
+			t.AutoFarm.Start(loc)
 		end
 	end)
 end
